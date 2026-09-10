@@ -53,6 +53,8 @@ export const MaterialTopAppBar: React.FC<Props> = ({
         return 'Free Access Panel';
       case 'user_login':
         return 'User Authentication';
+      case 'user_register':
+        return 'Create Account';
       case 'admin_login':
         return 'Admin Gateway';
       case 'user_dashboard':

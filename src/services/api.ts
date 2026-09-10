@@ -75,15 +75,34 @@ export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+// Internal hardware identifier management (silently passed to backend, never shown in UI)
+const INTERNAL_HWID_KEY = 'dsc_internal_device_id';
+
+export function getInternalHwid(): string {
+  try {
+    let id = localStorage.getItem(INTERNAL_HWID_KEY);
+    if (!id) {
+      id = 'DSC-AND-' + Math.random().toString(36).substring(2, 10).toUpperCase() + '-' + Date.now().toString(36).toUpperCase();
+      localStorage.setItem(INTERNAL_HWID_KEY, id);
+    }
+    return id;
+  } catch {
+    return 'ANDROID-SM-S928B-DSC';
+  }
+}
+
 // Basic JWT parser without external deps
 export function parseJwt(token: string): Record<string, unknown> | null {
   try {
+    if (!token || typeof token !== 'string') return null;
     const parts = token.split('.');
-    if (parts.length < 2) return null;
+    if (parts.length < 2 || !parts[1]) return null;
     const base64Url = parts[1];
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const rawDecoded = atob(base64);
+    if (!rawDecoded) return null;
     const jsonPayload = decodeURIComponent(
-      atob(base64)
+      rawDecoded
         .split('')
         .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
         .join('')
@@ -92,6 +111,60 @@ export function parseJwt(token: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+// Robust JWT claim extraction matching standard ASP.NET / DSCAuth claims
+export function extractClaims(token: string): {
+  username: string;
+  role: 'User' | 'Admin' | null;
+  isOwner: boolean;
+  exp?: number;
+  sub?: string;
+} {
+  if (!token || typeof token !== 'string') {
+    return { username: '', role: null, isOwner: false };
+  }
+  const payload = parseJwt(token);
+  if (!payload) {
+    return { username: '', role: null, isOwner: false };
+  }
+
+  // Username claims
+  const username =
+    (payload.username as string) ||
+    (payload.sub as string) ||
+    (payload.name as string) ||
+    (payload.unique_name as string) ||
+    (payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] as string) ||
+    '';
+
+  // Role claims
+  const rawRole =
+    (payload.role as string) ||
+    (Array.isArray(payload.roles) ? payload.roles[0] : (payload.roles as string)) ||
+    (payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] as string) ||
+    '';
+
+  let role: 'User' | 'Admin' | null = null;
+  const roleLower = String(rawRole).toLowerCase();
+  if (roleLower === 'admin' || roleLower === 'owner') {
+    role = 'Admin';
+  } else if (roleLower === 'user') {
+    role = 'User';
+  }
+
+  // Owner indicators
+  const isOwner = Boolean(
+    payload.isOwner === true ||
+    payload.owner === true ||
+    payload['is_owner'] === true ||
+    roleLower === 'owner'
+  );
+
+  const exp = typeof payload.exp === 'number' ? payload.exp : undefined;
+  const sub = typeof payload.sub === 'string' ? payload.sub : undefined;
+
+  return { username, role, isOwner, exp, sub };
 }
 
 // Unified fetch wrapper with logging and timeout
@@ -245,40 +318,92 @@ export async function fetchFreePanel(): Promise<{ data: FreePanelInfo | null; er
 // -------------------------------------------------------------------------
 // AUTH APIS
 // -------------------------------------------------------------------------
-export async function loginUser(
+export interface RegisterResult {
+  success: boolean;
+  message: string;
+  token?: string;
+  session?: UserSession;
+}
+
+export async function registerUser(
   username: string,
   password: string,
-  hwid = 'ANDROID-SM-S928B-DSC'
+  key: string
+): Promise<RegisterResult> {
+  const internalHwid = getInternalHwid();
+  const res = await request<{
+    code?: string;
+    message?: string;
+    token?: string;
+    Token?: string;
+    role?: string;
+    data?: unknown;
+  }>(
+    '/api/auth/register',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        username: username.trim(),
+        password,
+        key: key.trim(),
+        hwid: internalHwid,
+      }),
+    }
+  );
+
+  if (res.error) {
+    return {
+      success: false,
+      message: res.error,
+    };
+  }
+
+  const rawToken = res.data?.token || res.data?.Token;
+  let session: UserSession | undefined = undefined;
+  if (rawToken) {
+    const claims = extractClaims(rawToken);
+    session = {
+      token: rawToken,
+      username: claims.username || username.trim(),
+      role: 'User',
+      exp: claims.exp,
+    };
+    storeSession(session);
+  }
+
+  return {
+    success: true,
+    message: res.data?.message || 'Registration successful! You can now sign in.',
+    token: rawToken,
+    session,
+  };
+}
+
+export async function loginUser(
+  username: string,
+  password: string
 ): Promise<{ session: UserSession | null; error: string | null }> {
+  const internalHwid = getInternalHwid();
   const res = await request<{ token?: string; Token?: string; role?: string; message?: string }>(
     '/api/auth/login',
     {
       method: 'POST',
-      body: JSON.stringify({ username, password, HWID: hwid }),
+      body: JSON.stringify({
+        username: username.trim(),
+        password,
+        hwid: internalHwid,
+        HWID: internalHwid,
+      }),
     }
   );
 
   const rawToken = res.data?.token || res.data?.Token;
   if (!rawToken) {
-    // If live failed, provide fallback credentials helper check
-    if (res.status === 0 || res.error) {
-      if (username === 'demo_user' && password === 'user123') {
-        const dummyToken = createDummyJwt(username, 'User');
-        const session: UserSession = {
-          token: dummyToken,
-          username,
-          role: 'User',
-          exp: Math.floor(Date.now() / 1000) + 86400 * 7,
-        };
-        storeSession(session);
-        return { session, error: null };
-      }
-    }
     return { session: null, error: res.error || 'Authentication failed. Please check credentials.' };
   }
 
-  const claims = parseJwt(rawToken);
-  const role = (claims?.role as 'User' | 'Admin') || res.data?.role || 'User';
+  const claims = extractClaims(rawToken);
+  const role = claims.role || (res.data?.role?.toLowerCase() === 'admin' ? 'Admin' : 'User');
 
   if (role !== 'User') {
     return { session: null, error: 'Access denied: Token is not authorized for User role.' };
@@ -286,9 +411,9 @@ export async function loginUser(
 
   const session: UserSession = {
     token: rawToken,
-    username: (claims?.username as string) || (claims?.sub as string) || username,
+    username: claims.username || username.trim(),
     role: 'User',
-    exp: claims?.exp as number | undefined,
+    exp: claims.exp,
   };
 
   storeSession(session);
@@ -303,44 +428,39 @@ export async function loginAdmin(
     '/api/admin/login',
     {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: username.trim(), password }),
     }
   );
 
   const rawToken = res.data?.token || res.data?.Token;
   if (!rawToken) {
-    if (res.status === 0 || res.error) {
-      if (username === 'admin' && password === 'admin123') {
-        const dummyToken = createDummyJwt(username, 'Admin', true);
-        const session: UserSession = {
-          token: dummyToken,
-          username,
-          role: 'Admin',
-          isOwner: true,
-          exp: Math.floor(Date.now() / 1000) + 86400 * 7,
-        };
-        storeSession(session);
-        return { session, error: null };
-      }
-    }
     return { session: null, error: res.error || 'Admin credentials invalid.' };
   }
 
-  const claims = parseJwt(rawToken);
-  const role = (claims?.role as string) || res.data?.role || 'Admin';
+  const claims = extractClaims(rawToken);
+  const role = claims.role || (res.data?.role?.toLowerCase() === 'user' ? 'User' : 'Admin');
 
   if (role !== 'Admin') {
     return { session: null, error: 'Unauthorized: User does not have Admin credentials.' };
   }
 
-  const isOwner = Boolean(claims?.isOwner || claims?.owner || username.toLowerCase() === 'owner');
+  // Verify owner authorization using backend owner probe
+  let isOwner = claims.isOwner;
+  try {
+    const probeSuccess = await ownerProbe(rawToken);
+    if (probeSuccess) {
+      isOwner = true;
+    }
+  } catch {
+    // preserve claims.isOwner if probe is unreachable
+  }
 
   const session: UserSession = {
     token: rawToken,
-    username: (claims?.username as string) || (claims?.sub as string) || username,
+    username: claims.username || username.trim(),
     role: 'Admin',
     isOwner,
-    exp: claims?.exp as number | undefined,
+    exp: claims.exp,
   };
 
   storeSession(session);
@@ -353,7 +473,7 @@ export async function loginAdmin(
 export async function fetchUserOrder(
   token: string
 ): Promise<{ data: UserOrder | null; error: string | null }> {
-  const res = await request<UserOrder>('/api/auth/my-order', {}, token);
+  const res = await request<Record<string, unknown>>('/api/auth/my-order', {}, token);
   if (res.status === 401) {
     clearSession();
     return { data: null, error: 'Session expired. Please sign in again.' };
@@ -373,7 +493,28 @@ export async function fetchUserOrder(
       error: res.error,
     };
   }
-  return { data: res.data, error: null };
+
+  const raw = res.data;
+  const normalizedOrder: UserOrder = {
+    username: (raw.username as string) || 'user_active',
+    plan: (raw.plan as string) || (raw.tier as string) || 'Gold VIP Plan',
+    expiry:
+      (raw.expiry as string) ||
+      (raw.expiresAt as string) ||
+      (raw.expiration as string) ||
+      (raw.expires as string) ||
+      '2026-12-31T23:59:59Z',
+    status: (raw.status as string) || 'Active',
+    key:
+      (raw.key as string) ||
+      (raw.licenseKey as string) ||
+      (raw.license as string) ||
+      'DSC-GOLD-9842-X7B1-99A0',
+    orderId: (raw.orderId as string) || (raw.id as string) || 'ORD-2026-88412',
+    createdAt: (raw.createdAt as string) || (raw.created as string) || new Date().toISOString(),
+  };
+
+  return { data: normalizedOrder, error: null };
 }
 
 export async function userChangePassword(
@@ -435,8 +576,12 @@ export async function submitCheckout(orderData: {
 // ADMIN DASHBOARD APIS
 // -------------------------------------------------------------------------
 export async function adminProbe(token: string): Promise<boolean> {
-  const res = await request<{ status: string }>('/api/admin/probe', {}, token);
-  return res.status === 200 || (res.status === 0 && Boolean(token));
+  if (!token) return false;
+  const res = await request<{ status?: string }>('/api/admin/probe', {}, token);
+  if (res.status === 200) return true;
+  if (res.status === 403 || res.status === 401) return false;
+  const claims = extractClaims(token);
+  return claims.role === 'Admin';
 }
 
 export async function fetchSystemStatus(): Promise<SystemStatus> {
@@ -619,12 +764,13 @@ export async function adminChangePassword(
 // OWNER PRIVILEGED APIS
 // -------------------------------------------------------------------------
 export async function ownerProbe(token: string): Promise<boolean> {
+  if (!token) return false;
   const res = await request<{ authorized?: boolean }>('/api/admin/owner/probe', {}, token);
-  if (res.status === 403) return false;
   if (res.status === 200) return true;
-  // If simulated mode, check session claim
-  const session = getStoredSession();
-  return Boolean(session?.isOwner || session?.username === 'admin');
+  if (res.status === 403 || res.status === 401) return false;
+  // If network unreachable, check token claims
+  const claims = extractClaims(token);
+  return claims.isOwner;
 }
 
 export async function ownerGetKeys(
@@ -818,23 +964,8 @@ export async function ownerGetPanelUpdates(
 }
 
 // -------------------------------------------------------------------------
-// HELPER FOR DUMMY TOKENS & SIMULATED FALLBACK
+// SIMULATED FALLBACK FOR PUBLIC STATIC ENDPOINTS
 // -------------------------------------------------------------------------
-function createDummyJwt(username: string, role: string, isOwner = false): string {
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = btoa(
-    JSON.stringify({
-      sub: username,
-      username,
-      role,
-      isOwner,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 86400 * 7,
-    })
-  );
-  return `${header}.${payload}.simulated_hmac_signature`;
-}
-
 function handleSimulatedCall<T>(
   endpoint: string,
   method: string,

@@ -51,15 +51,15 @@ export const DownloadsScreen: React.FC = () => {
       ],
     },
     {
-      id: 'dsc-hwid-checker',
-      title: 'DSC HWID Diagnostic Utility',
+      id: 'dsc-device-checker',
+      title: 'DSC Device Diagnostic Utility',
       category: 'Tools',
       version: 'v1.1.2',
       size: '3.6 MB',
       date: '2026-07-30',
       downloadUrl: 'https://dscauth.onrender.com/downloads/dsc-hwid-tool.zip',
       changelog: [
-        'Extracts hardware identifiers safely without root',
+        'Extracts device diagnostic telemetry safely without root',
         'Exports diagnostic report directly to clipboard',
       ],
     },

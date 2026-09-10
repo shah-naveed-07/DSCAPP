@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Lock, User, Eye, EyeOff, Loader2, AlertCircle, ShieldAlert, KeyRound } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, Loader2, AlertCircle, ShieldAlert } from 'lucide-react';
 import { ScreenDestination, UserSession } from '../../types';
-import { loginAdmin } from '../../services/api';
+import { AuthManager } from '../../services/authManager';
 
 interface Props {
   onLoginSuccess: (session: UserSession) => void;
@@ -18,14 +18,14 @@ export const AdminLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate }
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password) {
-      setErrorMessage('Please provide admin credentials.');
+      setErrorMessage('Please provide administrative credentials.');
       return;
     }
 
     setIsLoading(true);
     setErrorMessage(null);
 
-    const { session, error } = await loginAdmin(username.trim(), password);
+    const { session, error } = await AuthManager.loginAdmin(username.trim(), password);
     setIsLoading(false);
 
     if (session) {
@@ -33,12 +33,6 @@ export const AdminLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate }
     } else {
       setErrorMessage(error || 'Admin login rejected. Unauthorized credentials.');
     }
-  };
-
-  const handleFillDemo = () => {
-    setUsername('admin');
-    setPassword('admin123');
-    setErrorMessage(null);
   };
 
   return (
@@ -58,7 +52,7 @@ export const AdminLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate }
       <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-start gap-2.5 text-xs text-purple-200">
         <ShieldAlert className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
         <span className="text-[11px] leading-relaxed">
-          Authorized personnel only. All access attempts are logged with hardware identifiers and IP telemetry on the DSCAuth cluster.
+          Authorized personnel only. All access attempts are recorded and monitored on the DSCAuth cluster.
         </span>
       </div>
 
@@ -131,19 +125,6 @@ export const AdminLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate }
             )}
           </button>
         </form>
-
-        {/* Demo Credentials Auto-Fill */}
-        <div className="mt-4 pt-3.5 border-t border-[#221f38] flex items-center justify-between">
-          <span className="text-[11px] text-slate-400">Need admin demo?</span>
-          <button
-            type="button"
-            onClick={handleFillDemo}
-            className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 font-medium px-2 py-1 rounded bg-purple-500/10 border border-purple-500/20"
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>Fill Demo Admin</span>
-          </button>
-        </div>
       </div>
 
       {/* Switch to User Login */}
@@ -152,7 +133,7 @@ export const AdminLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate }
           onClick={() => onNavigate('user_login')}
           className="text-xs text-slate-400 hover:text-cyan-400 transition-colors"
         >
-          Customer or Subscriber? <span className="text-cyan-400 underline font-semibold">User Login</span>
+          Not an administrator? <span className="text-cyan-400 underline font-semibold">User Login</span>
         </button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Shield, Lock, User, Eye, EyeOff, Loader2, AlertCircle, Smartphone, KeyRound } from 'lucide-react';
+import { Shield, Lock, User, Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
 import { ScreenDestination, UserSession } from '../../types';
-import { loginUser } from '../../services/api';
+import { AuthManager } from '../../services/authManager';
 
 interface Props {
   onLoginSuccess: (session: UserSession) => void;
@@ -15,8 +15,6 @@ export const UserLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate })
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const hwid = 'ANDROID-SM-S928B-DSC';
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password) {
@@ -27,7 +25,7 @@ export const UserLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate })
     setIsLoading(true);
     setErrorMessage(null);
 
-    const { session, error } = await loginUser(username.trim(), password, hwid);
+    const { session, error } = await AuthManager.loginUser(username.trim(), password);
     setIsLoading(false);
 
     if (session) {
@@ -37,12 +35,6 @@ export const UserLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate })
     }
   };
 
-  const handleFillDemo = () => {
-    setUsername('demo_user');
-    setPassword('user123');
-    setErrorMessage(null);
-  };
-
   return (
     <div className="flex flex-col gap-4 p-4 pb-8 text-slate-100 animate-fadeIn">
       {/* Header */}
@@ -50,10 +42,27 @@ export const UserLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate })
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mx-auto shadow-lg shadow-cyan-500/30 mb-2.5">
           <Shield className="w-6 h-6 text-slate-950 stroke-[2.5]" />
         </div>
-        <h2 className="text-base font-bold text-white">User Authentication</h2>
+        <h2 className="text-base font-bold text-white">Subscriber Portal</h2>
         <p className="text-xs text-slate-400 mt-0.5">
           Sign in to access your active subscription, license keys, and download center
         </p>
+      </div>
+
+      {/* Navigation Tabs between Login and Register */}
+      <div className="grid grid-cols-2 p-1 rounded-xl bg-[#121623] border border-[#232c45]">
+        <button
+          type="button"
+          className="py-1.5 text-xs font-semibold rounded-lg bg-cyan-500 text-slate-950 shadow-md transition-all text-center"
+        >
+          Sign In
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('user_register')}
+          className="py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition-all text-center"
+        >
+          Create Account
+        </button>
       </div>
 
       {/* Login Card */}
@@ -101,15 +110,6 @@ export const UserLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate })
             </div>
           </div>
 
-          {/* HWID Binding info */}
-          <div className="p-2.5 rounded-xl bg-[#171c2b] border border-[#21283d] flex items-center justify-between text-[11px] text-slate-400">
-            <div className="flex items-center gap-1.5">
-              <Smartphone className="w-3.5 h-3.5 text-slate-500" />
-              <span>Client HWID:</span>
-            </div>
-            <span className="font-mono text-cyan-300 font-semibold">{hwid}</span>
-          </div>
-
           {/* Error Message Alert */}
           {errorMessage && (
             <div className="flex items-center gap-2 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300">
@@ -127,7 +127,7 @@ export const UserLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate })
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Authenticating with DSCAuth...</span>
+                <span>Signing in to DSCAuth...</span>
               </>
             ) : (
               <span>Sign In to Dashboard</span>
@@ -135,16 +135,15 @@ export const UserLoginScreen: React.FC<Props> = ({ onLoginSuccess, onNavigate })
           </button>
         </form>
 
-        {/* Demo Credentials Helper */}
-        <div className="mt-4 pt-3.5 border-t border-[#1e2538] flex items-center justify-between">
-          <span className="text-[11px] text-slate-400">Need demo access?</span>
+        {/* Register Account Link */}
+        <div className="mt-4 pt-3.5 border-t border-[#1e2538] text-center">
           <button
             type="button"
-            onClick={handleFillDemo}
-            className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 font-medium px-2 py-1 rounded bg-cyan-500/10 border border-cyan-500/20"
+            onClick={() => onNavigate('user_register')}
+            className="text-xs text-slate-400 hover:text-cyan-400 transition-colors"
           >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>Fill Demo User</span>
+            Don&apos;t have an account yet?{' '}
+            <span className="text-cyan-400 underline font-semibold">Register with License Key</span>
           </button>
         </div>
       </div>

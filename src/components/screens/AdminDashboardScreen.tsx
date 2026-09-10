@@ -271,7 +271,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ session, onNavigate, onL
               type="text"
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
-              placeholder="Search by username, plan, or HWID..."
+              placeholder="Search by username or license tier..."
               className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#141825] border border-[#232a40] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
             />
           </div>
@@ -315,7 +315,12 @@ export const AdminDashboardScreen: React.FC<Props> = ({ session, onNavigate, onL
                   </div>
 
                   <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-2 border-t border-slate-800">
-                    <span>HWID: {u.hwid || 'NOT_BOUND'}</span>
+                    <span>
+                      Device:{' '}
+                      <span className={u.hwid ? 'text-emerald-400' : 'text-slate-500'}>
+                        {u.hwid ? 'Bound (Active)' : 'Unbound'}
+                      </span>
+                    </span>
                     <span>Exp: {u.expiry}</span>
                   </div>
                 </div>

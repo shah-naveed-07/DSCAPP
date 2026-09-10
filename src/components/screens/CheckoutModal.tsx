@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, CheckCircle2, Shield, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
 import { ProductItem } from '../../types';
-import { submitCheckout } from '../../services/api';
+import { submitCheckout, getInternalHwid } from '../../services/api';
 
 interface Props {
   product: ProductItem;
@@ -22,7 +22,6 @@ export const CheckoutModal: React.FC<Props> = ({ product, duration, onClose, onS
   const [orderResult, setOrderResult] = useState<{ orderId: string; message: string } | null>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
 
-  const hwid = 'ANDROID-SM-S928B-DSC';
   const paymentAddresses = {
     crypto_usdt: '0x71C...DarkSkullUSDT_TRC20',
     crypto_btc: 'bc1q...DarkSkullVaultBTC',
@@ -63,7 +62,7 @@ export const CheckoutModal: React.FC<Props> = ({ product, duration, onClose, onS
       duration,
       username: username.trim(),
       email: email.trim(),
-      hwid,
+      hwid: getInternalHwid(),
       paymentMethod,
       txHash: txHash.trim() || undefined,
     });
@@ -184,19 +183,6 @@ export const CheckoutModal: React.FC<Props> = ({ product, duration, onClose, onS
                 required
                 className="w-full px-3 py-2 rounded-lg bg-[#181d2c] border border-[#2b354f] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
               />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-slate-300">Device Hardware ID (HWID)</label>
-              <input
-                type="text"
-                value={hwid}
-                readOnly
-                className="w-full px-3 py-2 rounded-lg bg-[#141824] border border-[#22293d] text-xs text-slate-400 font-mono cursor-not-allowed"
-              />
-              <span className="text-[10px] text-slate-500">
-                Bound to this Android device client instance.
-              </span>
             </div>
 
             {/* Payment Method Selector */}

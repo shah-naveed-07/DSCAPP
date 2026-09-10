@@ -36,6 +36,7 @@ export const MaterialNavigationBar: React.FC<Props> = ({
         const Icon = item.icon;
         const isActive =
           currentScreen === item.id ||
+          (item.id === 'user_login' && (currentScreen === 'user_login' || currentScreen === 'user_register')) ||
           (item.id === 'user_dashboard' && currentScreen === 'user_dashboard') ||
           (item.id === 'admin_dashboard' &&
             (currentScreen === 'admin_dashboard' || currentScreen === 'owner_center'));

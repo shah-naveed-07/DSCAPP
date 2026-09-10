@@ -17,7 +17,7 @@ export const ProductsScreen: React.FC = () => {
       badge: 'Starter',
       accentColor: 'from-amber-600 to-amber-700',
       features: [
-        'Single device HWID license',
+        'Single device license activation',
         'Standard panel security injection',
         'Direct cloud updates & patches',
         'Community Discord support access',
@@ -34,7 +34,7 @@ export const ProductsScreen: React.FC = () => {
       popular: true,
       accentColor: 'from-slate-400 to-slate-500',
       features: [
-        'Multi-device roaming HWID license',
+        'Multi-device roaming license activation',
         'Priority low-latency server cluster',
         'Encrypted local configuration storage',
         'Rapid ticket dispatch & priority support',
@@ -51,7 +51,7 @@ export const ProductsScreen: React.FC = () => {
       badge: 'VIP Elite',
       accentColor: 'from-amber-400 to-yellow-600',
       features: [
-        'Dual active HWID simultaneous slots',
+        'Dual active device simultaneous slots',
         'Dedicated high-throughput proxy relays',
         'Direct developer private channel access',
         'Custom feature prioritization requests',

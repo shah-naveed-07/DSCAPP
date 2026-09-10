@@ -87,7 +87,7 @@ export const AndroidCodeModal: React.FC<Props> = ({ onClose }) => {
             </div>
             {fileKeys.map((key) => {
               const isSelected = selectedFile === key;
-              const fileName = key.split('/').pop();
+              const fileName = key && typeof key === 'string' ? key.split('/').pop() || key : 'file';
               return (
                 <button
                   key={key}

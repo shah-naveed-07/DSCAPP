@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ScreenDestination, UserSession } from './types';
-import { getStoredSession, storeSession, clearSession } from './services/api';
+import { AuthManager, AuthState } from './services/authManager';
 import { MaterialTopAppBar } from './components/MaterialTopAppBar';
 import { MaterialNavigationBar } from './components/MaterialNavigationBar';
 import { HomeScreen } from './components/screens/HomeScreen';
@@ -9,6 +9,7 @@ import { ProductsScreen } from './components/screens/ProductsScreen';
 import { FreePanelScreen } from './components/screens/FreePanelScreen';
 import { DownloadsScreen } from './components/screens/DownloadsScreen';
 import { UserLoginScreen } from './components/screens/UserLoginScreen';
+import { UserRegistrationScreen } from './components/screens/UserRegistrationScreen';
 import { AdminLoginScreen } from './components/screens/AdminLoginScreen';
 import { UserDashboardScreen } from './components/screens/UserDashboardScreen';
 import { AdminDashboardScreen } from './components/screens/AdminDashboardScreen';
@@ -24,57 +25,35 @@ import { FloatingAssistantButton } from './components/FloatingAssistantButton';
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenDestination>('home');
   const [screenHistory, setScreenHistory] = useState<ScreenDestination[]>(['home']);
-  const [session, setSession] = useState<UserSession | null>(getStoredSession());
+  const [authState, setAuthState] = useState<AuthState>(AuthManager.getState());
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [showAssistant, setShowAssistant] = useState(false);
 
-  // Sync session state to storage
+  // Subscribe to centralized AuthManager as the single source of truth
   useEffect(() => {
-    if (session) {
-      storeSession(session);
-    } else {
-      clearSession();
-    }
-  }, [session]);
+    const unsubscribe = AuthManager.subscribe((state) => {
+      setAuthState(state);
+    });
+    return unsubscribe;
+  }, []);
 
   // Section 10: Session Startup Workflow
   useEffect(() => {
-    const existing = getStoredSession();
-    if (!existing || !existing.token) {
-      // No token -> Public Home
-      return;
-    }
-    // Validate expiry
-    if (existing.exp && existing.exp * 1000 <= Date.now()) {
-      // Token expired -> clear and stay on public home
-      clearSession();
-      setSession(null);
-      return;
-    }
-    // Determine role and route accordingly on startup
-    if (existing.role === 'Admin') {
-      setCurrentScreen('admin_dashboard');
-      setScreenHistory(['home', 'admin_dashboard']);
-    } else if (existing.role === 'User') {
-      setCurrentScreen('user_dashboard');
-      setScreenHistory(['home', 'user_dashboard']);
-    }
+    AuthManager.restoreSession().then((restored) => {
+      if (restored.state === 'Admin') {
+        setCurrentScreen('admin_dashboard');
+        setScreenHistory(['home', 'admin_dashboard']);
+      } else if (restored.state === 'User') {
+        setCurrentScreen('user_dashboard');
+        setScreenHistory(['home', 'user_dashboard']);
+      }
+    });
   }, []);
 
   const handleNavigate = (destination: ScreenDestination) => {
-    // Route & Role Guards
-    let target = destination;
-    if (target === 'user_dashboard' && !session) {
-      target = 'user_login';
-    } else if (target === 'admin_dashboard' && session?.role !== 'Admin') {
-      target = 'admin_login';
-    } else if (target === 'owner_center' && (session?.role !== 'Admin' || !session?.isOwner)) {
-      target = session?.role === 'Admin' ? 'admin_dashboard' : 'admin_login';
-    } else if (target === 'user_login' && session?.role === 'User') {
-      target = 'user_dashboard';
-    } else if (target === 'admin_login' && session?.role === 'Admin') {
-      target = 'admin_dashboard';
-    }
+    // Check route and role access through AuthManager
+    const access = AuthManager.checkAccess(destination);
+    const target = access.allowed ? destination : (access.redirectTo || 'home');
 
     if (target === currentScreen) return;
     setScreenHistory((prev) => [...prev, target]);
@@ -95,19 +74,20 @@ export default function App() {
     }
   };
 
-  const handleUserLoginSuccess = (newSession: UserSession) => {
-    setSession(newSession);
-    handleNavigate('user_dashboard');
+  const handleUserLoginSuccess = (newSession?: UserSession) => {
+    if (newSession) {
+      handleNavigate('user_dashboard');
+    } else {
+      handleNavigate('user_login');
+    }
   };
 
-  const handleAdminLoginSuccess = (newSession: UserSession) => {
-    setSession(newSession);
+  const handleAdminLoginSuccess = (_newSession: UserSession) => {
     handleNavigate('admin_dashboard');
   };
 
   const handleLogout = () => {
-    setSession(null);
-    clearSession();
+    AuthManager.logout();
     handleNavigate('home');
   };
 
@@ -120,9 +100,9 @@ export default function App() {
         handleNavigate('downloads');
         break;
       case 'VIEW_DASHBOARD':
-        if (session?.role === 'Admin') {
+        if (authState.role === 'Admin') {
           handleNavigate('admin_dashboard');
-        } else if (session?.role === 'User') {
+        } else if (authState.role === 'User') {
           handleNavigate('user_dashboard');
         } else {
           handleNavigate('user_login');
@@ -133,41 +113,7 @@ export default function App() {
     }
   };
 
-  // Compute title for the current screen
-  const getScreenTitle = (screen: ScreenDestination): string => {
-    switch (screen) {
-      case 'home':
-        return 'DSCWeb';
-      case 'apps':
-        return 'Published Apps';
-      case 'products':
-        return 'VIP Products';
-      case 'freepanel':
-        return 'Free Access Panel';
-      case 'downloads':
-        return 'Downloads';
-      case 'user_login':
-        return 'Sign In';
-      case 'admin_login':
-        return 'Admin Gateway';
-      case 'user_dashboard':
-        return 'User Dashboard';
-      case 'admin_dashboard':
-        return 'Admin Console';
-      case 'owner_center':
-        return 'Owner Database';
-      case 'about':
-        return 'About DSC';
-      case 'contact':
-        return 'Contact Support';
-      case 'privacy':
-        return 'Privacy Policy';
-      case 'terms':
-        return 'Terms of Service';
-      default:
-        return 'DSCWeb Android';
-    }
-  };
+  const session = authState.session;
 
   return (
     <div className="min-h-screen bg-[#07090e] flex justify-center text-slate-100 selection:bg-cyan-500/30">
@@ -193,6 +139,12 @@ export default function App() {
           {currentScreen === 'downloads' && <DownloadsScreen />}
           {currentScreen === 'user_login' && (
             <UserLoginScreen onLoginSuccess={handleUserLoginSuccess} onNavigate={handleNavigate} />
+          )}
+          {currentScreen === 'user_register' && (
+            <UserRegistrationScreen
+              onRegisterSuccess={handleUserLoginSuccess}
+              onNavigate={handleNavigate}
+            />
           )}
           {currentScreen === 'admin_login' && (
             <AdminLoginScreen onLoginSuccess={handleAdminLoginSuccess} onNavigate={handleNavigate} />

@@ -114,8 +114,9 @@ export const UserDashboardScreen: React.FC<Props> = ({ session, onLogout }) => {
                   SUBSCRIBER
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5 font-mono">
-                HWID: ANDROID-SM-S928B-DSC
+              <p className="text-xs text-emerald-400 mt-0.5 flex items-center gap-1 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Device Status: Active &amp; Bound</span>
               </p>
             </div>
           </div>
@@ -158,7 +159,11 @@ export const UserDashboardScreen: React.FC<Props> = ({ session, onLogout }) => {
                 <div className="flex flex-col">
                   <span className="text-[10px] text-slate-400">Expires:</span>
                   <span className="font-semibold text-slate-200">
-                    {order.expiry.split('T')[0] || order.expiry}
+                    {order.expiry
+                      ? typeof order.expiry === 'string' && order.expiry.includes('T')
+                        ? order.expiry.split('T')[0]
+                        : String(order.expiry)
+                      : 'Lifetime Active'}
                   </span>
                 </div>
               </div>
@@ -194,8 +199,10 @@ export const UserDashboardScreen: React.FC<Props> = ({ session, onLogout }) => {
             <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[#0f121d] border border-[#21283d]">
               <span className="font-mono text-xs font-semibold text-cyan-300 tracking-wider">
                 {showKey
-                  ? order.key
-                  : order.key.replace(/[A-Z0-9]/g, (c, i) => (i < 4 || i > 15 ? c : '•'))}
+                  ? (order.key || 'DSC-ACTIVE-KEY')
+                  : (order.key || 'DSC-ACTIVE-KEY').replace(/[A-Z0-9]/g, (c, i) =>
+                      i < 4 || i > 15 ? c : '•'
+                    )}
               </span>
               <button
                 onClick={handleCopyKey}

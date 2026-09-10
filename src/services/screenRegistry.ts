@@ -106,17 +106,33 @@ export const SCREEN_SEMANTIC_REGISTRY: Record<ScreenDestination, ScreenSemanticI
   user_login: {
     screenId: 'user_login',
     title: 'Subscriber Sign In',
-    description: 'Authentication portal for active subscribers, linking account credentials with the client hardware identifier (HWID).',
+    description: 'Authentication portal for active subscribers, linking account credentials securely with DSCAuth.',
     category: 'public',
     availableActions: [
       { action: 'LOGIN_USER', label: 'Sign In', description: 'Submits credentials to /api/auth/login' },
-      { action: 'FILL_DEMO', label: 'Fill Demo', description: 'Fills demo subscriber credentials' },
+      { action: 'OPEN_REGISTER', label: 'Create Account', description: 'Switches to registration screen' },
       { action: 'OPEN_ADMIN_LOGIN', label: 'Admin Login', description: 'Switches to administrative gateway' },
     ],
-    readableSummary: 'User login screen requiring username, password, and bound hardware HWID. Includes quick demo credential autofill for immediate testing.',
+    readableSummary: 'User login screen requiring username and password. Seamlessly handles client device binding internally.',
     componentHelp: {
-      'client hwid field': 'Displays the device hardware identifier automatically attached to authentication requests.',
-      'fill demo user button': 'Quickly fills sample subscriber credentials (demo_user / user123).',
+      'username field': 'Enter subscriber account username.',
+      'password field': 'Enter subscriber account password.',
+    },
+  },
+  user_register: {
+    screenId: 'user_register',
+    title: 'Create DSC Account',
+    description: 'Registration screen for new subscribers, verifying subscription license key directly against the DSCAuth backend.',
+    category: 'public',
+    availableActions: [
+      { action: 'REGISTER_USER', label: 'Create Account', description: 'Submits credentials and key to /api/auth/register' },
+      { action: 'OPEN_LOGIN', label: 'Sign In', description: 'Switches back to sign in screen' },
+    ],
+    readableSummary: 'User registration screen requiring username, password, confirm password, and license key. Device identifier is managed securely and silently.',
+    componentHelp: {
+      'username field': 'Desired account username (minimum 3 characters).',
+      'password field': 'Desired account password (minimum 3 characters).',
+      'license key field': 'Valid DSC subscription license key (e.g. DSC-PLAT-...).',
     },
   },
   admin_login: {
@@ -126,12 +142,12 @@ export const SCREEN_SEMANTIC_REGISTRY: Record<ScreenDestination, ScreenSemanticI
     category: 'public',
     availableActions: [
       { action: 'LOGIN_ADMIN', label: 'Sign In Admin', description: 'Submits credentials to /api/admin/login' },
-      { action: 'FILL_DEMO_ADMIN', label: 'Fill Demo Admin', description: 'Fills demo administrator credentials' },
       { action: 'OPEN_USER_LOGIN', label: 'User Login', description: 'Switches back to user login' },
     ],
     readableSummary: 'Restricted administrative entry portal requiring authorized operator passphrase. Validates operator role and owner permissions upon successful JWT grant.',
     componentHelp: {
-      'fill demo admin button': 'Fills sample administrator credentials (admin / admin123).',
+      'admin username': 'Operator account identifier.',
+      'admin passphrase': 'Operator access passphrase.',
     },
   },
   user_dashboard: {

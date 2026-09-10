@@ -149,6 +149,7 @@ export type ScreenDestination =
   | 'terms'
   | 'freepanel'
   | 'user_login'
+  | 'user_register'
   | 'admin_login'
   | 'user_dashboard'
   | 'admin_dashboard'
