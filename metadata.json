@@ -1,0 +1,6 @@
+{
+  "name": "DSCWeb Android App",
+  "description": "Native Android client for Dark Skull Corporation (DSCWeb) platform, featuring AI Voice & Text Assistant, JWT authentication, User and Admin dashboards, Owner management, and live backend integration.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
