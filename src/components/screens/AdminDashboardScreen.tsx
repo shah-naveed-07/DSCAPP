@@ -75,6 +75,30 @@ export const AdminDashboardScreen: React.FC<Props> = ({ session, onNavigate, onL
     loadData();
   }, [session.token]);
 
+  useEffect(() => {
+    const handleSearchEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ username: string }>;
+      if (custom.detail?.username) {
+        setActiveTab('users');
+        setUserSearch(custom.detail.username);
+      }
+    };
+    const handleSwitchTab = (e: Event) => {
+      const custom = e as CustomEvent<{ tab: 'overview' | 'users' | 'orders' | 'admin_ops' }>;
+      if (custom.detail?.tab) {
+        setActiveTab(custom.detail.tab);
+      }
+    };
+
+    window.addEventListener('admin_search_user', handleSearchEvent);
+    window.addEventListener('admin_switch_tab', handleSwitchTab);
+
+    return () => {
+      window.removeEventListener('admin_search_user', handleSearchEvent);
+      window.removeEventListener('admin_switch_tab', handleSwitchTab);
+    };
+  }, []);
+
   const handleOrderDecision = async (orderId: string, mode: 'approve' | 'reject') => {
     const res = await adminUpdateOrder(session.token, orderId, mode);
     setActionFeedback(res.message);
@@ -119,12 +143,15 @@ export const AdminDashboardScreen: React.FC<Props> = ({ session, onNavigate, onL
     setTimeout(() => setActionFeedback(null), 3500);
   };
 
-  const filteredUsers = users.filter(
-    (u) =>
-      u.username.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.plan.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.hwid?.toLowerCase().includes(userSearch.toLowerCase())
-  );
+  const filteredUsers = users.filter((u) => {
+    if (!userSearch) return true;
+    const query = (userSearch || '').toLowerCase();
+    return (
+      (u.username || '').toLowerCase().includes(query) ||
+      (u.plan || '').toLowerCase().includes(query) ||
+      (u.hwid || '').toLowerCase().includes(query)
+    );
+  });
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8 text-slate-100 animate-fadeIn">
@@ -294,12 +321,12 @@ export const AdminDashboardScreen: React.FC<Props> = ({ session, onNavigate, onL
                         <span className="text-xs font-bold text-white">{u.username}</span>
                         <span
                           className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${
-                            u.status === 'active'
+                            (u.status || '').toLowerCase() === 'active'
                               ? 'bg-emerald-500/20 text-emerald-400'
                               : 'bg-red-500/20 text-red-400'
                           }`}
                         >
-                          {u.status.toUpperCase()}
+                          {(u.status ? String(u.status).toUpperCase() : 'ACTIVE')}
                         </span>
                       </div>
                       <p className="text-[11px] text-cyan-400 mt-0.5">{u.plan}</p>

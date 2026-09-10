@@ -93,12 +93,12 @@ export const MaterialTopAppBar: React.FC<Props> = ({
                 className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold ${
                   session.isOwner
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : session.role === 'Admin'
+                    : (session.role || '').toLowerCase() === 'admin'
                     ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                     : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
                 }`}
               >
-                {session.isOwner ? 'OWNER' : session.role.toUpperCase()}
+                {session.isOwner ? 'OWNER' : (session.role ? String(session.role).toUpperCase() : 'USER')}
               </span>
             )}
           </div>
@@ -111,10 +111,10 @@ export const MaterialTopAppBar: React.FC<Props> = ({
       </div>
 
       <div className="flex items-center gap-1">
-        {/* AI Voice Assistant Trigger */}
+        {/* MJ Assistant Trigger */}
         <button
           onClick={onOpenAssistant}
-          title="Open AI Voice Assistant"
+          title="Ask MJ"
           className="p-1.5 text-cyan-400 hover:text-cyan-300 rounded-lg hover:bg-cyan-500/15 transition-colors relative"
         >
           <Bot className="w-4 h-4" />

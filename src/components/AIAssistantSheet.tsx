@@ -7,34 +7,33 @@ import {
   VolumeX,
   X,
   Trash2,
-  Sparkles,
   Bot,
   User,
   AlertCircle,
   CheckCircle2,
-  ArrowRight,
-  RotateCcw,
   StopCircle,
-  HelpCircle,
   Terminal,
+  Loader2,
 } from 'lucide-react';
-import { ScreenDestination, UserSession } from '../types';
+import { ScreenDestination, UserSession, UserOrder } from '../types';
 import {
   ChatMessage,
   queryAssistant,
+  LiveDataContext,
 } from '../services/aiAssistantService';
 import {
   startVoiceListening,
   stopVoiceListening,
   speakText,
   stopSpeaking,
+  stopAllSpeech,
   isVoiceOutputEnabled,
   setVoiceOutputEnabled,
-  isSpeechRecognitionSupported,
   AssistantVoiceState,
 } from '../services/speechService';
 import { getScreenSemantic } from '../services/screenRegistry';
 import { validateActionPermission, ACTION_DEFINITIONS } from '../services/actionRegistry';
+import { fetchUserOrder, getAppConfig } from '../services/api';
 
 interface Props {
   isOpen: boolean;
@@ -42,7 +41,11 @@ interface Props {
   currentScreen: ScreenDestination;
   session: UserSession | null;
   onNavigate: (screen: ScreenDestination) => void;
-  onActionExecute?: (actionCode: string, payload?: unknown) => void;
+  onBack?: () => void;
+  onActionExecute?: (
+    actionCode: string,
+    payload?: unknown
+  ) => Promise<{ success: boolean; message?: string }> | void;
 }
 
 export const AIAssistantSheet: React.FC<Props> = ({
@@ -51,13 +54,14 @@ export const AIAssistantSheet: React.FC<Props> = ({
   currentScreen,
   session,
   onNavigate,
+  onBack,
   onActionExecute,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'assistant',
-      text: 'Hello! I am your DSCWeb in-app Voice Assistant. You can speak or type to navigate screens, read page contents, discover buttons, or check subscription details.',
+      text: "Hi, I'm MJ. How can I help?\n\nYou can talk to me in English or natural Hinglish. For example:\n• \"Mera dashboard kholo\"\n• \"Mera plan kab expire hoga?\"\n• \"Downloads open karo\"\n• \"Ye page kya hai?\"",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -65,27 +69,40 @@ export const AIAssistantSheet: React.FC<Props> = ({
   const [voiceState, setVoiceState] = useState<AssistantVoiceState>('idle');
   const [voiceOutput, setVoiceOutput] = useState<boolean>(isVoiceOutputEnabled());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [cachedOrder, setCachedOrder] = useState<UserOrder | null>(null);
+  const [isExecutingAction, setIsExecutingAction] = useState(false);
+
   const [pendingConfirmation, setPendingConfirmation] = useState<{
     actionCode: string;
     prompt: string;
-    messageId: string;
+    payload?: Record<string, unknown>;
   } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stopListeningRef = useRef<(() => void) | null>(null);
 
-  // Auto-scroll to bottom
+  // Pre-load user order if session exists for real live context
+  useEffect(() => {
+    if (session && session.token) {
+      fetchUserOrder(session.token).then((res) => {
+        if (res.data) setCachedOrder(res.data);
+      });
+    } else {
+      setCachedOrder(null);
+    }
+  }, [session]);
+
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (isOpen) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isOpen]);
+  }, [messages, isOpen, voiceState, isExecutingAction]);
 
-  // Clean up voice when closed
+  // Stop both STT and TTS when closed
   useEffect(() => {
     if (!isOpen) {
-      stopVoiceListening();
-      stopSpeaking();
+      stopAllSpeech();
       setVoiceState('idle');
     }
   }, [isOpen]);
@@ -125,62 +142,27 @@ export const AIAssistantSheet: React.FC<Props> = ({
     stopListeningRef.current = stop;
   };
 
-  const executeAction = (actionCode: string, payload?: unknown) => {
-    const validation = validateActionPermission(actionCode, session);
-
-    if (!validation.allowed) {
-      addAssistantMessage(validation.reason || 'Action not permitted for current role.');
-      return;
-    }
-
-    const actionDef = validation.actionDef;
-
-    // 1. Navigation actions
-    if (actionDef?.targetScreen) {
-      onNavigate(actionDef.targetScreen);
-      return;
-    }
-
-    // 2. Specific Screen Utilities
-    if (actionCode === 'COPY_USER_KEY') {
-      if (onActionExecute) onActionExecute('COPY_USER_KEY');
-      return;
-    }
-
-    if (actionCode === 'START_DOWNLOAD') {
-      onNavigate('downloads');
-      return;
-    }
-
-    if (actionCode === 'REFRESH_CURRENT_SCREEN') {
-      if (onActionExecute) onActionExecute('REFRESH_CURRENT_SCREEN');
-      return;
-    }
-
-    if (onActionExecute) {
-      onActionExecute(actionCode, payload);
-    }
-  };
-
   const addAssistantMessage = (
     text: string,
     intent?: string | null,
     actionCode?: string | null,
-    requiresConf?: boolean
+    requiresConf?: boolean,
+    actionPayload?: Record<string, unknown>
   ) => {
     const newMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       sender: 'assistant',
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       intent,
       actionCode,
       requiresConfirmation: requiresConf,
+      actionPayload,
     };
 
     setMessages((prev) => [...prev, newMsg]);
 
-    // Handle voice output
+    // Speak aloud if enabled
     if (voiceOutput) {
       setVoiceState('speaking');
       speakText(
@@ -191,15 +173,61 @@ export const AIAssistantSheet: React.FC<Props> = ({
     }
   };
 
-  const handleSendQuery = async (queryText?: string) => {
-    const textToSend = queryText || inputText;
-    if (!textToSend.trim()) return;
+  const executeAction = async (actionCode: string, payload?: Record<string, unknown>) => {
+    const validation = validateActionPermission(actionCode, session);
 
-    // Add user message
+    if (!validation.allowed) {
+      const reason = validation.reasonHinglish || validation.reason || 'Action not permitted.';
+      addAssistantMessage(reason);
+      return;
+    }
+
+    const actionDef = validation.actionDef;
+
+    // Handle back navigation
+    if (actionCode === 'NAVIGATE_BACK') {
+      if (onBack) {
+        onBack();
+      } else {
+        onNavigate('home');
+      }
+      return;
+    }
+
+    // Handle screen destinations
+    if (actionDef?.targetScreen) {
+      onNavigate(actionDef.targetScreen);
+      return;
+    }
+
+    // Handle action execution via callback with result awareness
+    if (onActionExecute) {
+      setIsExecutingAction(true);
+      try {
+        const result = await onActionExecute(actionCode, payload);
+        setIsExecutingAction(false);
+        if (result && typeof result === 'object' && result.success === false) {
+          addAssistantMessage(`Action complete nahi ho saka: ${result.message || 'Error occurred.'}`);
+        }
+      } catch (err) {
+        setIsExecutingAction(false);
+        addAssistantMessage(`Action execution failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+    }
+  };
+
+  const handleSendQuery = async (queryText?: string) => {
+    const textToSend = (queryText || inputText).trim();
+    if (!textToSend) return;
+
+    // Stop listening if active
+    stopVoiceListening();
+
+    // Add user message to UI
     const userMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: `msg-user-${Date.now()}`,
       sender: 'user',
-      text: textToSend.trim(),
+      text: textToSend,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -208,55 +236,113 @@ export const AIAssistantSheet: React.FC<Props> = ({
     setVoiceState('processing');
     setErrorMessage(null);
 
-    // Query backend AI assistant
-    const response = await queryAssistant(textToSend, currentScreen, session, messages);
+    const liveContext: LiveDataContext = {
+      userOrder: cachedOrder,
+      systemConfig: getAppConfig(),
+      activeScreen: currentScreen,
+    };
+
+    // Query MJ Assistant engine
+    const response = await queryAssistant(textToSend, currentScreen, session, messages, liveContext);
 
     setVoiceState('idle');
 
-    // Check if action requires confirmation
-    if (response.action && response.requiresConfirmation) {
-      const actionDef = ACTION_DEFINITIONS[response.action];
-      const prompt = actionDef?.confirmationPrompt || `Execute ${actionDef?.label || response.action}?`;
+    // Handle Follow-up Affirmation (e.g. user said "haan", "yes", "kar do")
+    if (response.intent === 'CONFIRM_PROCEED' && pendingConfirmation) {
+      const actionToRun = pendingConfirmation.actionCode;
+      const payloadToRun = pendingConfirmation.payload;
+      setPendingConfirmation(null);
 
-      addAssistantMessage(response.message, response.intent, response.action, true);
-      setPendingConfirmation({
-        actionCode: response.action,
-        prompt,
-        messageId: `msg-${Date.now()}`,
-      });
+      // Mark confirmation handled
+      setMessages((prev) =>
+        prev.map((m) => (m.requiresConfirmation ? { ...m, confirmationHandled: true } : m))
+      );
+
+      addAssistantMessage(response.message || 'Executing confirmed action...');
+      await executeAction(actionToRun, payloadToRun);
       return;
     }
 
-    // Direct allowed action execution
+    // Handle Follow-up Cancellation (e.g. user said "nahi", "cancel", "mat karo")
+    if (response.intent === 'CONFIRM_CANCEL' && pendingConfirmation) {
+      setPendingConfirmation(null);
+      setMessages((prev) =>
+        prev.map((m) => (m.requiresConfirmation ? { ...m, confirmationHandled: true } : m))
+      );
+      addAssistantMessage(response.message || 'Action cancelled.');
+      return;
+    }
+
+    // Check if new action requires explicit confirmation
+    if (response.action && response.requiresConfirmation) {
+      const actionDef = ACTION_DEFINITIONS[response.action];
+      const prompt =
+        actionDef?.confirmationPromptHinglish ||
+        actionDef?.confirmationPrompt ||
+        `Kya aap ${actionDef?.label || response.action} execute karna chahte hain?`;
+
+      setPendingConfirmation({
+        actionCode: response.action,
+        prompt,
+        payload: response.actionPayload || undefined,
+      });
+
+      addAssistantMessage(
+        response.message,
+        response.intent,
+        response.action,
+        true,
+        response.actionPayload || undefined
+      );
+      return;
+    }
+
+    // Execute direct allowed action
     if (response.action) {
-      executeAction(response.action, response.actionPayload);
+      await executeAction(response.action, response.actionPayload || undefined);
     }
 
-    addAssistantMessage(response.message, response.intent, response.action, false);
+    addAssistantMessage(
+      response.message,
+      response.intent,
+      response.action,
+      false,
+      response.actionPayload || undefined
+    );
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmPendingAction = async () => {
     if (pendingConfirmation) {
-      executeAction(pendingConfirmation.actionCode);
-      addAssistantMessage(`Confirmed: Executed ${pendingConfirmation.actionCode}.`);
+      const { actionCode, payload } = pendingConfirmation;
       setPendingConfirmation(null);
+
+      setMessages((prev) =>
+        prev.map((m) => (m.requiresConfirmation ? { ...m, confirmationHandled: true } : m))
+      );
+
+      addAssistantMessage(`Action confirm ho gaya: ${actionCode} execute kiya ja raha hai.`);
+      await executeAction(actionCode, payload);
     }
   };
 
-  const handleCancelAction = () => {
+  const handleCancelPendingAction = () => {
     if (pendingConfirmation) {
-      addAssistantMessage('Action cancelled.');
       setPendingConfirmation(null);
+      setMessages((prev) =>
+        prev.map((m) => (m.requiresConfirmation ? { ...m, confirmationHandled: true } : m))
+      );
+      addAssistantMessage('Action cancel kar diya gaya hai.');
     }
   };
 
   const handleClearChat = () => {
     stopSpeaking();
+    setPendingConfirmation(null);
     setMessages([
       {
         id: 'welcome',
         sender: 'assistant',
-        text: 'Conversation history cleared. How can I help you in DSCWeb today?',
+        text: "Hi, I'm MJ. How can I help?\n\nChat history reset ho gayi hai. Batayein main kya madad kar sakta hoon?",
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ]);
@@ -265,12 +351,14 @@ export const AIAssistantSheet: React.FC<Props> = ({
   const currentSemantic = getScreenSemantic(currentScreen);
 
   const quickPrompts = [
-    'Read this page for me',
-    'What can I do on this screen?',
-    'Where are my downloads?',
-    'What is my current plan?',
-    'Show me VIP Products',
-    'Open Free Panel',
+    'Mera dashboard kholo',
+    'Mera plan batao',
+    'Downloads kholo',
+    'Free panel dikhao',
+    'Ye page kya hai?',
+    'Yaha kya kar sakta hu?',
+    'Settings kholo',
+    'Maintenance status kya hai?',
   ];
 
   if (!isOpen) return null;
@@ -291,9 +379,9 @@ export const AIAssistantSheet: React.FC<Props> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="text-xs font-bold text-white">DSC AI Voice Assistant</h3>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold">
-                  v2.5
+                <h3 className="text-sm font-bold text-white tracking-wide">MJ</h3>
+                <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-mono font-medium">
+                  In-App Assistant
                 </span>
               </div>
               <div className="flex items-center gap-1 text-[10px] text-slate-400">
@@ -310,11 +398,11 @@ export const AIAssistantSheet: React.FC<Props> = ({
                 />
                 <span className="capitalize font-mono">
                   {voiceState === 'listening'
-                    ? 'Listening to microphone...'
+                    ? 'MJ is listening...'
                     : voiceState === 'processing'
-                    ? 'Reasoning intent...'
+                    ? 'MJ is thinking...'
                     : voiceState === 'speaking'
-                    ? 'Speaking response...'
+                    ? 'MJ is speaking...'
                     : 'Ready'}
                 </span>
               </div>
@@ -330,7 +418,7 @@ export const AIAssistantSheet: React.FC<Props> = ({
                   ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
                   : 'bg-slate-800/60 border-slate-700 text-slate-400'
               }`}
-              title={voiceOutput ? 'Voice output enabled' : 'Voice output disabled'}
+              title={voiceOutput ? 'Voice playback ON' : 'Voice playback OFF'}
             >
               {voiceOutput ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
@@ -348,16 +436,17 @@ export const AIAssistantSheet: React.FC<Props> = ({
             <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              title="Close MJ"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Current Screen Semantic Context Indicator */}
+        {/* Current Screen Semantic Context Bar */}
         <div className="px-3.5 py-1.5 bg-[#101422] border-b border-[#1c2234] flex items-center justify-between text-[11px] text-slate-400">
           <div className="flex items-center gap-1.5 truncate">
-            <span className="text-slate-500">Context:</span>
+            <span className="text-slate-500">Screen:</span>
             <span className="font-semibold text-cyan-400 truncate">{currentSemantic.title}</span>
           </div>
           <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 shrink-0">
@@ -365,7 +454,7 @@ export const AIAssistantSheet: React.FC<Props> = ({
           </span>
         </div>
 
-        {/* Chat History Message Stream */}
+        {/* Chat History Stream */}
         <div className="flex-1 overflow-y-auto p-3.5 flex flex-col gap-3">
           {messages.map((msg) => {
             const isUser = msg.sender === 'user';
@@ -396,7 +485,7 @@ export const AIAssistantSheet: React.FC<Props> = ({
                 >
                   <p className="whitespace-pre-line">{msg.text}</p>
 
-                  {/* Action Badge if an action was identified */}
+                  {/* Registered Action Pill */}
                   {msg.actionCode && (
                     <div className="mt-1 pt-1.5 border-t border-slate-700/60 flex items-center justify-between text-[10px] font-mono text-cyan-300">
                       <span className="flex items-center gap-1">
@@ -411,11 +500,11 @@ export const AIAssistantSheet: React.FC<Props> = ({
                     {!isUser && voiceOutput && (
                       <button
                         onClick={() => speakText(msg.text)}
-                        className="hover:text-cyan-300 flex items-center gap-0.5"
+                        className="hover:text-cyan-300 flex items-center gap-0.5 ml-2"
                         title="Replay Voice"
                       >
                         <Volume2 className="w-2.5 h-2.5" />
-                        <span>Replay</span>
+                        <span>Play</span>
                       </button>
                     )}
                   </div>
@@ -437,27 +526,38 @@ export const AIAssistantSheet: React.FC<Props> = ({
 
               <div className="flex items-center gap-2 mt-1">
                 <button
-                  onClick={handleConfirmAction}
-                  className="flex-1 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all"
+                  onClick={handleConfirmPendingAction}
+                  disabled={isExecutingAction}
+                  className="flex-1 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all flex items-center justify-center gap-1"
                 >
-                  Confirm & Execute
+                  {isExecutingAction ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>Haan, proceed karo</span>
                 </button>
                 <button
-                  onClick={handleCancelAction}
+                  onClick={handleCancelPendingAction}
+                  disabled={isExecutingAction}
                   className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-all"
                 >
-                  Cancel
+                  Nahi, cancel
                 </button>
               </div>
             </div>
           )}
 
-          {/* Voice speaking wave indicator */}
+          {/* Action Execution Indicator */}
+          {isExecutingAction && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-300 animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Action execute ho raha hai...</span>
+            </div>
+          )}
+
+          {/* Voice speaking indicator */}
           {voiceState === 'speaking' && (
             <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 animate-pulse">
               <div className="flex items-center gap-2">
                 <Volume2 className="w-4 h-4 text-emerald-400" />
-                <span className="text-[11px]">Speaking response...</span>
+                <span className="text-[11px]">MJ is speaking...</span>
               </div>
               <button
                 onClick={() => {
@@ -524,8 +624,8 @@ export const AIAssistantSheet: React.FC<Props> = ({
             }}
             placeholder={
               voiceState === 'listening'
-                ? 'Listening... speak clearly'
-                : 'Ask anything (e.g., "Open downloads", "Read page")...'
+                ? 'MJ is listening... speak clearly'
+                : 'Ask MJ in English or Hinglish (e.g., "Downloads kholo")...'
             }
             className="flex-1 px-3 py-2 rounded-xl bg-[#171c2b] border border-[#27324c] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
           />

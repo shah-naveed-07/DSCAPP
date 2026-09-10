@@ -10,6 +10,7 @@ export interface ActionDefinition {
   requiresOwner?: boolean;
   requiresConfirmation?: boolean;
   confirmationPrompt?: string;
+  confirmationPromptHinglish?: string;
   targetScreen?: ScreenDestination;
 }
 
@@ -150,6 +151,12 @@ export const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
   },
 
   // In-screen utility actions
+  NAVIGATE_BACK: {
+    code: 'NAVIGATE_BACK',
+    label: 'Go Back',
+    description: 'Navigates back to the previous screen',
+    minRole: 'Guest',
+  },
   COPY_USER_KEY: {
     code: 'COPY_USER_KEY',
     label: 'Copy License Key',
@@ -168,6 +175,48 @@ export const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
     description: 'Refreshes live network data on the active screen',
     minRole: 'Guest',
   },
+  SEARCH_USER: {
+    code: 'SEARCH_USER',
+    label: 'Search User',
+    description: 'Filters registered users list in Admin Console by username',
+    minRole: 'Admin',
+  },
+  SEARCH_ORDER: {
+    code: 'SEARCH_ORDER',
+    label: 'Search Order',
+    description: 'Filters orders list by query or plan name',
+    minRole: 'Admin',
+  },
+  CHECK_MY_PLAN: {
+    code: 'CHECK_MY_PLAN',
+    label: 'Check My Plan',
+    description: 'Fetches active user plan details and expiration',
+    minRole: 'User',
+  },
+  CHECK_MAINTENANCE: {
+    code: 'CHECK_MAINTENANCE',
+    label: 'Check Maintenance',
+    description: 'Checks global system maintenance status',
+    minRole: 'Guest',
+  },
+  CHECK_FREE_PANEL: {
+    code: 'CHECK_FREE_PANEL',
+    label: 'Check Free Panel',
+    description: 'Inspects free panel slot availability and companion status',
+    minRole: 'Guest',
+  },
+  EXPLAIN_SCREEN: {
+    code: 'EXPLAIN_SCREEN',
+    label: 'Explain Screen',
+    description: 'Provides detailed overview of current screen purpose and components',
+    minRole: 'Guest',
+  },
+  EXPLAIN_ACTIONS: {
+    code: 'EXPLAIN_ACTIONS',
+    label: 'Explain Available Actions',
+    description: 'Lists all available actions and buttons on current screen',
+    minRole: 'Guest',
+  },
   LOGOUT: {
     code: 'LOGOUT',
     label: 'Sign Out',
@@ -175,6 +224,7 @@ export const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
     minRole: 'User',
     requiresConfirmation: true,
     confirmationPrompt: 'Are you sure you want to sign out of your session?',
+    confirmationPromptHinglish: 'Kya aap apne session se log out karna chahte hain?',
   },
 
   // Sensitive Owner/Admin actions requiring explicit user confirmation
@@ -185,6 +235,7 @@ export const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
     minRole: 'Admin',
     requiresConfirmation: true,
     confirmationPrompt: 'Are you sure you want to permanently delete this user account? This cannot be undone.',
+    confirmationPromptHinglish: 'Is user ko permanently delete kiya jayega. Kya main proceed karun?',
   },
   DELETE_KEY: {
     code: 'DELETE_KEY',
@@ -194,6 +245,7 @@ export const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
     requiresOwner: true,
     requiresConfirmation: true,
     confirmationPrompt: 'Are you sure you want to permanently revoke this license key from the database?',
+    confirmationPromptHinglish: 'Is license key ko database se revoke kiya jayega. Kya confirm hai?',
   },
   DELETE_ADMIN: {
     code: 'DELETE_ADMIN',
@@ -203,6 +255,7 @@ export const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
     requiresOwner: true,
     requiresConfirmation: true,
     confirmationPrompt: 'Are you sure you want to revoke this administrator account?',
+    confirmationPromptHinglish: 'Is operator ke Admin permissions revoke kiye jayenge. Kya confirm hai?',
   },
   TOGGLE_MAINTENANCE: {
     code: 'TOGGLE_MAINTENANCE',
@@ -212,12 +265,32 @@ export const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
     requiresOwner: true,
     requiresConfirmation: true,
     confirmationPrompt: 'Are you sure you want to toggle global maintenance mode for all public clients?',
+    confirmationPromptHinglish: 'Global maintenance mode toggle kiya jayega. Kya aap proceed karna chahte hain?',
+  },
+  APPROVE_ORDER: {
+    code: 'APPROVE_ORDER',
+    label: 'Approve Order',
+    description: 'Approves pending customer order and activates subscription',
+    minRole: 'Admin',
+    requiresConfirmation: true,
+    confirmationPrompt: 'Are you sure you want to approve this order and issue the subscription key?',
+    confirmationPromptHinglish: 'Is order ko approve karke subscription activate ki jaye? Confirm karein.',
+  },
+  REJECT_ORDER: {
+    code: 'REJECT_ORDER',
+    label: 'Reject Order',
+    description: 'Declines pending customer order',
+    minRole: 'Admin',
+    requiresConfirmation: true,
+    confirmationPrompt: 'Are you sure you want to reject this order?',
+    confirmationPromptHinglish: 'Is order ko reject kar diya jaye? Confirm karein.',
   },
 };
 
 export interface ValidationResult {
   allowed: boolean;
   reason?: string;
+  reasonHinglish?: string;
   actionDef?: ActionDefinition;
   requiresConfirmation?: boolean;
 }
@@ -228,7 +301,11 @@ export function validateActionPermission(
 ): ValidationResult {
   const actionDef = ACTION_DEFINITIONS[actionCode];
   if (!actionDef) {
-    return { allowed: false, reason: `Action "${actionCode}" is not registered in the system.` };
+    return {
+      allowed: false,
+      reason: `Action "${actionCode}" is not registered in the system.`,
+      reasonHinglish: `Yeh action system mein registered nahi hai.`,
+    };
   }
 
   const userRole: UserRole = session ? session.role : 'Guest';
@@ -239,6 +316,7 @@ export function validateActionPermission(
       return {
         allowed: false,
         reason: 'Administrator credentials are required to execute this operation.',
+        reasonHinglish: 'Is action ke liye Administrator login hona zaroori hai.',
         actionDef,
       };
     }
@@ -247,18 +325,20 @@ export function validateActionPermission(
       return {
         allowed: false,
         reason: 'Please sign in to access subscriber features.',
+        reasonHinglish: 'Is feature ke liye pehle login karna zaroori hai.',
         actionDef,
       };
     }
   }
 
-  // Owner privilege check
+  // Owner privilege check (STRICT: username check is strictly forbidden, only verified isOwner boolean)
   if (actionDef.requiresOwner) {
-    const isOwner = session?.isOwner === true || session?.username === 'admin' || session?.username === 'owner';
+    const isOwner = Boolean(session && session.isOwner === true);
     if (!isOwner) {
       return {
         allowed: false,
         reason: 'Master Owner privileges are required to perform this sensitive action.',
+        reasonHinglish: 'Sorry, aapke current account ke paas Master Owner privileges nahi hain.',
         actionDef,
       };
     }

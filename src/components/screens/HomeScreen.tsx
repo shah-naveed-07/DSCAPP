@@ -14,8 +14,8 @@ import {
   ExternalLink,
   Cpu,
 } from 'lucide-react';
-import { ScreenDestination, SystemStatus } from '../../types';
-import { fetchSystemStatus, API_BASE_URL } from '../../services/api';
+import { ScreenDestination, SystemStatus, SystemSettings } from '../../types';
+import { fetchSystemStatus, API_BASE_URL, getAppConfig, subscribeAppConfig } from '../../services/api';
 
 interface Props {
   onNavigate: (screen: ScreenDestination) => void;
@@ -23,9 +23,12 @@ interface Props {
 
 export const HomeScreen: React.FC<Props> = ({ onNavigate }) => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [config, setConfig] = useState<SystemSettings>(getAppConfig());
 
   useEffect(() => {
     fetchSystemStatus().then((status) => setSystemStatus(status));
+    const unsubscribe = subscribeAppConfig((newCfg) => setConfig(newCfg));
+    return () => unsubscribe();
   }, []);
 
   return (
@@ -71,6 +74,50 @@ export const HomeScreen: React.FC<Props> = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {/* Owner-Controlled Home Download Button */}
+      {config.showHomeDownloadBtn && (
+        <div className="p-3.5 rounded-xl bg-gradient-to-r from-[#141b2c] via-[#101524] to-[#0c101c] border border-cyan-500/40 shadow-lg flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 shrink-0">
+              <DownloadCloud className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-white">Official Android APK</span>
+                <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500 text-slate-950 font-bold rounded">
+                  DIRECT
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {config.downloadLink || config.apkUrl
+                  ? 'Official signed build from DSCAuth backend'
+                  : 'Download link currently pending owner configuration'}
+              </p>
+            </div>
+          </div>
+
+          {config.downloadLink || config.apkUrl ? (
+            <a
+              href={config.downloadLink || config.apkUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all flex items-center gap-1 shrink-0 shadow-md shadow-cyan-500/20"
+            >
+              <DownloadCloud className="w-3.5 h-3.5" />
+              <span>Download</span>
+            </a>
+          ) : (
+            <button
+              disabled
+              className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-500 font-medium text-xs cursor-not-allowed border border-slate-700/60 shrink-0"
+              title="Download unavailable"
+            >
+              Unavailable
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Free Panel Highlight Banner */}
       <div

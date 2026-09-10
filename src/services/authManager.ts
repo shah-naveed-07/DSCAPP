@@ -108,12 +108,15 @@ class AuthManagerService {
       }
     }
 
+    const role: 'User' | 'Admin' = existing.role || (isOwner ? 'Admin' : 'User');
+    existing.role = role;
+
     this.currentState = {
-      state: existing.role,
+      state: role,
       session: existing,
       token: existing.token,
       username: existing.username,
-      role: existing.role,
+      role: role,
       isOwner,
       exp: existing.exp || null,
       isLoading: false,

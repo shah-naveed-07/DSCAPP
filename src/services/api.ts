@@ -10,6 +10,8 @@ import {
   SystemSettings,
   PanelUpdate,
   NetworkLog,
+  FreeUserRecord,
+  PanelStatusUpdate,
 } from '../types';
 
 export const API_BASE_URL = 'https://dscauth.onrender.com';
@@ -60,6 +62,21 @@ export function getStoredSession(): UserSession | null {
       clearSession();
       return null;
     }
+
+    // Guard against missing or malformed role
+    if (!session.role && session.token) {
+      const claims = extractClaims(session.token);
+      session.role = claims.role || (session.isOwner ? 'Admin' : 'User');
+      if (!session.username && claims.username) {
+        session.username = claims.username;
+      }
+      if (typeof session.isOwner !== 'boolean') {
+        session.isOwner = claims.isOwner;
+      }
+    } else if (!session.role) {
+      session.role = session.isOwner ? 'Admin' : 'User';
+    }
+
     return session;
   } catch {
     clearSession();
@@ -77,6 +94,56 @@ export function clearSession() {
 
 // Internal hardware identifier management (silently passed to backend, never shown in UI)
 const INTERNAL_HWID_KEY = 'dsc_internal_device_id';
+
+// Owner Configuration Cache & Sync
+const APP_CONFIG_STORAGE_KEY = 'dsc_owner_system_config_v2';
+
+type ConfigListener = (cfg: SystemSettings) => void;
+const configListeners: Set<ConfigListener> = new Set();
+
+export function getAppConfig(): SystemSettings {
+  try {
+    const raw = localStorage.getItem(APP_CONFIG_STORAGE_KEY);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch {
+    // fallback clean configuration
+  }
+  return {
+    registrationOpen: true,
+    freePanelActive: true,
+    defaultDurationDays: 30,
+    showHomeDownloadBtn: false,
+    freeLink: '',
+    downloadLink: '',
+    apkUrl: '',
+    maintenance: false,
+    announcement: 'DSC Official Native Android Client connected.',
+    supportDiscord: 'https://discord.gg/darkskull',
+    supportTelegram: 'https://t.me/dscofficial',
+  };
+}
+
+export function saveAppConfig(newCfg: Partial<SystemSettings>): SystemSettings {
+  const current = getAppConfig();
+  const merged: SystemSettings = { ...current, ...newCfg };
+  try {
+    localStorage.setItem(APP_CONFIG_STORAGE_KEY, JSON.stringify(merged));
+  } catch {
+    // ignore
+  }
+  configListeners.forEach((fn) => fn(merged));
+  return merged;
+}
+
+export function subscribeAppConfig(listener: ConfigListener): () => void {
+  configListeners.add(listener);
+  listener(getAppConfig());
+  return () => {
+    configListeners.delete(listener);
+  };
+}
 
 export function getInternalHwid(): string {
   try {
@@ -296,8 +363,9 @@ async function request<T>(
 // -------------------------------------------------------------------------
 export async function fetchFreePanel(): Promise<{ data: FreePanelInfo | null; error: string | null }> {
   const res = await request<FreePanelInfo>('/api/public/free-panel');
+  const cfg = getAppConfig();
   if (res.error || !res.data) {
-    // Fallback default structure
+    // Dynamic backend-driven fallback structure without hardcoded external URLs
     return {
       data: {
         available: true,
@@ -306,13 +374,19 @@ export async function fetchFreePanel(): Promise<{ data: FreePanelInfo | null; er
         remainingSlots: 14,
         totalSlots: 50,
         progress: 72,
-        downloadUrl: 'https://dscauth.onrender.com/api/auth/download?plan=Free',
+        downloadUrl: cfg.freeLink || '',
         message: 'Free access slots currently active.',
       },
       error: res.error,
     };
   }
-  return { data: res.data, error: null };
+  return {
+    data: {
+      ...res.data,
+      downloadUrl: res.data.downloadUrl || cfg.freeLink || '',
+    },
+    error: null,
+  };
 }
 
 // -------------------------------------------------------------------------
@@ -403,7 +477,7 @@ export async function loginUser(
   }
 
   const claims = extractClaims(rawToken);
-  const role = claims.role || (res.data?.role?.toLowerCase() === 'admin' ? 'Admin' : 'User');
+  const role = claims.role || ((res.data?.role || '').toLowerCase() === 'admin' ? 'Admin' : 'User');
 
   if (role !== 'User') {
     return { session: null, error: 'Access denied: Token is not authorized for User role.' };
@@ -438,7 +512,7 @@ export async function loginAdmin(
   }
 
   const claims = extractClaims(rawToken);
-  const role = claims.role || (res.data?.role?.toLowerCase() === 'user' ? 'User' : 'Admin');
+  const role = claims.role || ((res.data?.role || '').toLowerCase() === 'user' ? 'User' : 'Admin');
 
   if (role !== 'Admin') {
     return { session: null, error: 'Unauthorized: User does not have Admin credentials.' };
@@ -886,16 +960,12 @@ export async function ownerGetSettings(
   token: string
 ): Promise<{ settings: SystemSettings | null; error: string | null }> {
   const res = await request<SystemSettings>('/api/admin/settings/all', {}, token);
-  if (res.data) return { settings: res.data, error: null };
+  if (res.data) {
+    const updated = saveAppConfig(res.data);
+    return { settings: updated, error: null };
+  }
   return {
-    settings: {
-      registrationOpen: true,
-      freePanelActive: true,
-      defaultDurationDays: 30,
-      announcement: 'DSC Android 2.4 update deployed with Keystore token security.',
-      supportDiscord: 'https://discord.gg/darkskull',
-      supportTelegram: 'https://t.me/dscofficial',
-    },
+    settings: getAppConfig(),
     error: res.error,
   };
 }
@@ -904,6 +974,9 @@ export async function ownerUpdateSettings(
   token: string,
   settings: Partial<SystemSettings>
 ): Promise<{ success: boolean; message: string }> {
+  // Update local dynamic config cache and broadcast to all screens immediately
+  saveAppConfig(settings);
+
   const res = await request<{ message?: string }>(
     '/api/admin/settings/update',
     {
@@ -925,6 +998,9 @@ export async function ownerToggleMaintenance(
     },
     token
   );
+  if (!res.error) {
+    saveAppConfig({ maintenance: Boolean(res.data?.maintenance) });
+  }
   return {
     success: !res.error,
     maintenance: Boolean(res.data?.maintenance),
@@ -944,18 +1020,19 @@ export async function ownerGetPanelUpdates(
     const list = Array.isArray(res.data) ? res.data : res.data.updates || [];
     return { updates: list, error: null };
   }
+  const cfg = getAppConfig();
   return {
     updates: [
       {
         version: 'v2.4.1',
         releaseNotes: 'Fixed memory footprint on Android 14. Added biometric prompt support.',
-        downloadUrl: 'https://dscauth.onrender.com/downloads/dsc-panel-v2.4.1.apk',
+        downloadUrl: cfg.downloadLink || cfg.apkUrl || '',
         releaseDate: '2026-09-08',
       },
       {
         version: 'v2.3.9',
         releaseNotes: 'Enhanced HWID binding. Optimized background thread sync.',
-        downloadUrl: 'https://dscauth.onrender.com/downloads/dsc-panel-v2.3.9.apk',
+        downloadUrl: cfg.downloadLink || cfg.apkUrl || '',
         releaseDate: '2026-08-15',
       },
     ],
@@ -963,8 +1040,276 @@ export async function ownerGetPanelUpdates(
   };
 }
 
+export async function ownerGetUsers(
+  token: string
+): Promise<{ users: AdminUser[]; error: string | null }> {
+  const res = await request<{ users?: AdminUser[] } | AdminUser[]>('/api/admin/users', {}, token);
+  if (res.data) {
+    const rawList = Array.isArray(res.data) ? res.data : (res.data as { users?: AdminUser[] }).users || [];
+    const users: AdminUser[] = rawList.map((u: any, idx: number) => ({
+      id: String(u.id || u.Id || `user-${idx + 1}`),
+      username: u.username || u.Username || 'Unknown',
+      plan: u.plan || u.Plan || 'Standard VIP',
+      expiry: u.expiryTime || u.ExpiryTime || u.expiry || '2026-12-31',
+      status: u.isBanned || u.IsBanned ? 'suspended' : 'active',
+      hwid: u.hwid || u.HWID || undefined,
+      createdAt: u.registrationTime || u.RegistrationTime || u.createdAt || '2026-01-01',
+    }));
+    return { users, error: null };
+  }
+  return {
+    users: [
+      { id: 'usr-1', username: 'shadow_operator', plan: 'Platinum Elite', expiry: '2026-10-15', status: 'active', hwid: 'HWID-98A1-4402-BF19', createdAt: '2026-08-10' },
+      { id: 'usr-2', username: 'cyber_ghost', plan: 'Gold VIP', expiry: '2026-09-30', status: 'active', hwid: 'HWID-1120-77C3-AA01', createdAt: '2026-08-15' },
+      { id: 'usr-3', username: 'navi_strike', plan: 'Silver Regular', expiry: '2026-09-20', status: 'active', hwid: 'HWID-4589-99E1-0023', createdAt: '2026-08-20' },
+      { id: 'usr-4', username: 'rogue_echo', plan: 'Platinum Elite', expiry: '2026-08-01', status: 'expired', hwid: 'HWID-7734-22A9-5509', createdAt: '2026-07-01' },
+      { id: 'usr-5', username: 'null_pointer', plan: 'Gold VIP', expiry: '2026-09-25', status: 'suspended', hwid: 'HWID-3390-11B5-9988', createdAt: '2026-08-05' },
+    ],
+    error: res.error,
+  };
+}
+
+export async function ownerUpdateUser(
+  token: string,
+  user: { id: string; username?: string; plan?: string; isBanned?: boolean; expiry?: string; hwid?: string }
+): Promise<{ success: boolean; message: string }> {
+  const res = await request<{ message?: string }>(
+    '/api/admin/user/update',
+    {
+      method: 'POST',
+      body: JSON.stringify(user),
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'User record updated.' };
+}
+
+export async function ownerDeleteUser(
+  token: string,
+  userId: string
+): Promise<{ success: boolean; message: string }> {
+  const res = await request<{ message?: string }>(
+    `/api/admin/user/delete/${userId}`,
+    {
+      method: 'DELETE',
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'User removed from database.' };
+}
+
+export async function ownerGetFreeUsers(
+  token: string
+): Promise<{ freeUsers: FreeUserRecord[]; error: string | null }> {
+  const res = await request<{ freeUsers?: FreeUserRecord[] } | FreeUserRecord[]>('/api/admin/free-users', {}, token);
+  if (res.data) {
+    const rawList = Array.isArray(res.data) ? res.data : (res.data as { freeUsers?: FreeUserRecord[] }).freeUsers || [];
+    const freeUsers: FreeUserRecord[] = rawList.map((f: any, idx: number) => ({
+      id: String(f.id || f.Id || `free-${idx + 1}`),
+      username: f.username || f.Username || 'dsc_free_slot',
+      hwid: f.hwid || f.HWID || undefined,
+      captchaToken: f.captchaToken || f.CaptchaToken || undefined,
+      isBanned: Boolean(f.isBanned || f.IsBanned),
+      failedLoginAttempts: f.failedLoginAttempts || f.FailedLoginAttempts || 0,
+      firstLoginTime: f.firstLoginTime || f.FirstLoginTime || '2026-09-01',
+      lastLoginTime: f.lastLoginTime || f.LastLoginTime || '2026-09-10',
+    }));
+    return { freeUsers, error: null };
+  }
+  return {
+    freeUsers: [
+      { id: 'free-1', username: 'free_agent_01', hwid: 'HWID-FREE-0012-A', isBanned: false, failedLoginAttempts: 0, firstLoginTime: '2026-09-08 10:20', lastLoginTime: '2026-09-10 14:15' },
+      { id: 'free-2', username: 'free_agent_02', hwid: 'HWID-FREE-0099-B', isBanned: false, failedLoginAttempts: 1, firstLoginTime: '2026-09-09 11:00', lastLoginTime: '2026-09-10 09:30' },
+      { id: 'free-3', username: 'free_agent_03', hwid: 'HWID-FREE-4411-Z', isBanned: true, failedLoginAttempts: 4, firstLoginTime: '2026-09-05 18:40', lastLoginTime: '2026-09-07 22:10' },
+    ],
+    error: res.error,
+  };
+}
+
+export async function ownerUpdateFreeUser(
+  token: string,
+  freeUser: Partial<FreeUserRecord>
+): Promise<{ success: boolean; message: string }> {
+  const res = await request<{ message?: string }>(
+    '/api/admin/manage/free-user/update',
+    {
+      method: 'POST',
+      body: JSON.stringify(freeUser),
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'Free user updated.' };
+}
+
+export async function ownerDeleteFreeUser(
+  token: string,
+  freeUserId: string
+): Promise<{ success: boolean; message: string }> {
+  const res = await request<{ message?: string }>(
+    `/api/admin/manage/free-user/delete/${freeUserId}`,
+    {
+      method: 'DELETE',
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'Free user slot released.' };
+}
+
+export async function ownerSetGlobalUserPass(
+  token: string,
+  config: {
+    freeUsername?: string;
+    freePassword?: string;
+    maxFreeSlots?: number | string;
+    freeValidDays?: number | string;
+    showHomeDownloadBtn?: boolean;
+  }
+): Promise<{ success: boolean; message: string }> {
+  saveAppConfig(config);
+  const res = await request<{ message?: string }>(
+    '/api/admin/settings/update',
+    {
+      method: 'POST',
+      body: JSON.stringify(config),
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'Global UserPass configuration updated.' };
+}
+
+export async function ownerGetPanelStatus(
+  token: string
+): Promise<{ status: PanelStatusUpdate; error: string | null }> {
+  const res = await request<PanelStatusUpdate | { data?: PanelStatusUpdate }>('/api/auth/panel-updates', {}, token);
+  if (res.data) {
+    const raw: any = (res.data as any).data || res.data;
+    return {
+      status: {
+        update1: raw.update1 || raw.Update1 || 'Operational (v3.5)',
+        update2: raw.update2 || raw.Update2 || 'Updated (Safe)',
+        update3: raw.update3 || raw.Update3 || 'Kernel Bypass Active',
+        update4: raw.update4 || raw.Update4 || 'All Systems Normal',
+      },
+      error: null,
+    };
+  }
+  return {
+    status: {
+      update1: 'Operational (v3.5)',
+      update2: 'Updated (Safe)',
+      update3: 'Kernel Bypass Active',
+      update4: 'All Systems Normal',
+    },
+    error: res.error,
+  };
+}
+
+export async function ownerSavePanelStatus(
+  token: string,
+  status: PanelStatusUpdate
+): Promise<{ success: boolean; message: string }> {
+  const res = await request<{ message?: string }>(
+    '/api/auth/panel-updates/save',
+    {
+      method: 'POST',
+      body: JSON.stringify(status),
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'Panel status live updates saved.' };
+}
+
+export async function ownerGetAllOrders(
+  token: string
+): Promise<{ orders: AdminOrder[]; error: string | null }> {
+  let res = await request<{ orders?: AdminOrder[] } | AdminOrder[]>('/api/admin/orders/all', {}, token);
+  if (res.error || !res.data) {
+    res = await request<{ orders?: AdminOrder[] } | AdminOrder[]>('/api/admin/orders/pending', {}, token);
+  }
+  if (res.data) {
+    const rawList = Array.isArray(res.data) ? res.data : (res.data as { orders?: AdminOrder[] }).orders || [];
+    const orders: AdminOrder[] = rawList.map((o: any, idx: number) => ({
+      id: String(o.id || o.Id || `order-${idx + 1}`),
+      username: o.username || o.Username || 'Customer',
+      plan: o.plan || o.Plan || 'VIP Plan',
+      price: o.price || o.Price || '$49.99',
+      status: (o.status || o.Status || 'pending').toLowerCase() as 'pending' | 'approved' | 'rejected',
+      paymentProof: o.paymentProof || o.PaymentProof || undefined,
+      createdAt: o.createdAt || o.CreatedAt || '2026-09-09',
+    }));
+    return { orders, error: null };
+  }
+  return {
+    orders: [
+      { id: 'ord-101', username: 'viper_lead', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'pending', createdAt: '2026-09-09 18:22' },
+      { id: 'ord-102', username: 'matrix_apex', plan: 'Gold VIP (60 Days)', price: '$119.99', status: 'approved', createdAt: '2026-09-08 14:05' },
+      { id: 'ord-103', username: 'ghost_pulse', plan: 'Silver Regular (14 Days)', price: '$29.99', status: 'pending', createdAt: '2026-09-10 08:30' },
+      { id: 'ord-104', username: 'test_subscriber', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'rejected', createdAt: '2026-09-07 19:40' },
+    ],
+    error: res.error,
+  };
+}
+
+export async function ownerProcessOrder(
+  token: string,
+  orderId: string,
+  mode: 'approve' | 'reject'
+): Promise<{ success: boolean; message: string }> {
+  let res = await request<{ message?: string }>(
+    `/api/admin/orders/${mode}/${orderId}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+    token
+  );
+  if (res.error) {
+    res = await request<{ message?: string }>(
+      '/api/admin/orders/update',
+      {
+        method: 'POST',
+        body: JSON.stringify({ id: orderId, status: mode === 'approve' ? 'Approved' : 'Rejected' }),
+      },
+      token
+    );
+  }
+  return {
+    success: !res.error,
+    message: res.data?.message || res.error || `Order marked as ${mode === 'approve' ? 'Approved' : 'Rejected'}.`,
+  };
+}
+
+export async function ownerDeleteOrder(
+  token: string,
+  orderId: string
+): Promise<{ success: boolean; message: string }> {
+  const res = await request<{ message?: string }>(
+    `/api/admin/orders/delete/${orderId}`,
+    {
+      method: 'DELETE',
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'Order removed.' };
+}
+
+export async function ownerCreateAdmin(
+  token: string,
+  data: { username: string; password?: string; role?: string }
+): Promise<{ success: boolean; message: string }> {
+  const res = await request<{ message?: string }>(
+    '/api/admin/create-admin',
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    },
+    token
+  );
+  return { success: !res.error, message: res.data?.message || res.error || 'Admin account created successfully.' };
+}
+
 // -------------------------------------------------------------------------
-// SIMULATED FALLBACK FOR PUBLIC STATIC ENDPOINTS
+// SIMULATED FALLBACK FOR ENDPOINTS (Offline & Resilient Mock Fallback)
 // -------------------------------------------------------------------------
 function handleSimulatedCall<T>(
   endpoint: string,
@@ -972,16 +1317,18 @@ function handleSimulatedCall<T>(
   _body: unknown,
   _token?: string
 ): { data: T | null; error: string | null; status: number } {
+  const cfg = getAppConfig();
+
   if (endpoint === '/api/public/free-panel') {
     return {
       data: {
         available: true,
-        username: 'dsc_free_demo',
-        password: 'DSC_FreePass_2026',
+        username: cfg.freeUsername || 'dsc_free_demo',
+        password: cfg.freePassword || 'DSC_FreePass_2026',
         remainingSlots: 18,
-        totalSlots: 50,
+        totalSlots: Number(cfg.maxFreeSlots) || 50,
         progress: 64,
-        downloadUrl: 'https://dscauth.onrender.com/api/auth/download?plan=Free',
+        downloadUrl: cfg.freeLink || '',
         message: 'Simulated Free Access Slots Online',
       } as unknown as T,
       error: null,
@@ -992,11 +1339,113 @@ function handleSimulatedCall<T>(
   if (endpoint === '/api/admin/system-status') {
     return {
       data: {
-        maintenance: false,
-        message: 'All Dark Skull systems active.',
-        version: '2.4.1-android',
-        uptime: '99.99%',
+        isMaintenanceMode: Boolean(cfg.maintenance),
+        maintenanceReason: cfg.maintenanceReason || 'Panel Is Ready to use',
+        latestVersion: cfg.latestVersion || '3.5',
+        updateUrl: cfg.downloadLink || cfg.apkUrl || 'https://dscweb.me/',
+        showHomeDownloadBtn: Boolean(cfg.showHomeDownloadBtn),
+        freeLink: cfg.freeLink || '',
       } as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/owner/probe') {
+    return {
+      data: { authorized: true } as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/users') {
+    return {
+      data: [
+        { id: '1', username: 'shadow_operator', plan: 'Platinum Elite', expiryTime: '2026-10-15', isBanned: false, hwid: 'HWID-98A1-4402-BF19', registrationTime: '2026-08-10' },
+        { id: '2', username: 'cyber_ghost', plan: 'Gold VIP', expiryTime: '2026-09-30', isBanned: false, hwid: 'HWID-1120-77C3-AA01', registrationTime: '2026-08-15' },
+        { id: '3', username: 'navi_strike', plan: 'Silver Regular', expiryTime: '2026-09-20', isBanned: false, hwid: 'HWID-4589-99E1-0023', registrationTime: '2026-08-20' },
+        { id: '4', username: 'rogue_echo', plan: 'Platinum Elite', expiryTime: '2026-08-01', isBanned: false, hwid: 'HWID-7734-22A9-5509', registrationTime: '2026-07-01' },
+        { id: '5', username: 'null_pointer', plan: 'Gold VIP', expiryTime: '2026-09-25', isBanned: true, hwid: 'HWID-3390-11B5-9988', registrationTime: '2026-08-05' },
+      ] as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/free-users') {
+    return {
+      data: [
+        { id: '1', username: 'free_agent_01', hwid: 'HWID-FREE-0012-A', isBanned: false, failedLoginAttempts: 0, firstLoginTime: '2026-09-08 10:20', lastLoginTime: '2026-09-10 14:15' },
+        { id: '2', username: 'free_agent_02', hwid: 'HWID-FREE-0099-B', isBanned: false, failedLoginAttempts: 1, firstLoginTime: '2026-09-09 11:00', lastLoginTime: '2026-09-10 09:30' },
+        { id: '3', username: 'free_agent_03', hwid: 'HWID-FREE-4411-Z', isBanned: true, failedLoginAttempts: 4, firstLoginTime: '2026-09-05 18:40', lastLoginTime: '2026-09-07 22:10' },
+      ] as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/keys') {
+    return {
+      data: [
+        { id: 'key-1', key: 'DSC-PLAT-7712-B8X0-112A', plan: 'Platinum Elite', durationDays: 30, status: 'unused', createdAt: '2026-09-01' },
+        { id: 'key-2', key: 'DSC-GOLD-4412-K9L1-889P', plan: 'Gold VIP', durationDays: 60, status: 'used', usedBy: 'night_blade', createdAt: '2026-08-20' },
+        { id: 'key-3', key: 'DSC-SILV-1190-Z3Q2-441K', plan: 'Silver Regular', durationDays: 14, status: 'unused', createdAt: '2026-09-05' },
+      ] as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/manage/admins') {
+    return {
+      data: [
+        { id: 'adm-1', username: 'admin', role: 'Owner', isOwner: true, createdAt: '2025-01-01' },
+        { id: 'adm-2', username: 'dsc_moderator', role: 'Admin', isOwner: false, createdAt: '2026-02-14' },
+        { id: 'adm-3', username: 'support_lead', role: 'Admin', isOwner: false, createdAt: '2026-06-01' },
+      ] as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/orders/all' || endpoint === '/api/admin/orders/pending') {
+    return {
+      data: [
+        { id: 'ord-101', username: 'viper_lead', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'pending', createdAt: '2026-09-09 18:22' },
+        { id: 'ord-102', username: 'matrix_apex', plan: 'Gold VIP (60 Days)', price: '$119.99', status: 'approved', createdAt: '2026-09-08 14:05' },
+        { id: 'ord-103', username: 'ghost_pulse', plan: 'Silver Regular (14 Days)', price: '$29.99', status: 'pending', createdAt: '2026-09-10 08:30' },
+        { id: 'ord-104', username: 'test_subscriber', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'rejected', createdAt: '2026-09-07 19:40' },
+      ] as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/settings/all') {
+    return {
+      data: cfg as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/auth/panel-updates') {
+    return {
+      data: {
+        update1: 'Operational (v3.5)',
+        update2: 'Updated (Safe)',
+        update3: 'Kernel Bypass Active',
+        update4: 'All Systems Normal',
+      } as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (method === 'DELETE' || method === 'POST' || method === 'PUT') {
+    return {
+      data: { success: true, message: 'Operation executed successfully.' } as unknown as T,
       error: null,
       status: 200,
     };

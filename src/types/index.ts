@@ -66,6 +66,25 @@ export interface AdminAccount {
   createdAt: string;
 }
 
+export interface FreeUserRecord {
+  id: string;
+  username: string;
+  hwid?: string;
+  captchaToken?: string;
+  isBanned?: boolean;
+  failedLoginAttempts?: number;
+  lockoutEnd?: string;
+  firstLoginTime?: string;
+  lastLoginTime?: string;
+}
+
+export interface PanelStatusUpdate {
+  update1?: string; // Aimbot Status
+  update2?: string; // Sniper Status
+  update3?: string; // Bypass Status
+  update4?: string; // General Status
+}
+
 export interface SystemStatus {
   maintenance: boolean;
   message?: string;
@@ -74,18 +93,37 @@ export interface SystemStatus {
 }
 
 export interface SystemSettings {
-  registrationOpen: boolean;
-  freePanelActive: boolean;
-  defaultDurationDays: number;
+  registrationOpen?: boolean;
+  freePanelActive?: boolean;
+  defaultDurationDays?: number;
   announcement?: string;
   supportDiscord?: string;
   supportTelegram?: string;
+  freeLink?: string;
+  showHomeDownloadBtn?: boolean;
+  downloadLink?: string;
+  apkUrl?: string;
+  maintenance?: boolean;
+  latestVersion?: string;
+  updateUrl?: string;
+  maintenanceReason?: string;
+  freeUsername?: string;
+  freePassword?: string;
+  maxFreeSlots?: number | string;
+  freeValidDays?: number | string;
+  streamerLink?: string;
+  sniperLink?: string;
+  specialLink?: string;
+  aimbotLink?: string;
+  premiumLink?: string;
+  customisedLink?: string;
+  [key: string]: unknown;
 }
 
 export interface PanelUpdate {
   version: string;
   releaseNotes: string;
-  downloadUrl: string;
+  downloadUrl?: string;
   releaseDate: string;
 }
 

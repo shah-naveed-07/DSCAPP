@@ -6,12 +6,13 @@ import {
   Check,
   Download,
   AlertTriangle,
+  AlertCircle,
   RefreshCw,
   Clock,
   ShieldAlert,
 } from 'lucide-react';
 import { FreePanelInfo } from '../../types';
-import { fetchFreePanel } from '../../services/api';
+import { fetchFreePanel, subscribeAppConfig } from '../../services/api';
 
 export const FreePanelScreen: React.FC = () => {
   const [panelInfo, setPanelInfo] = useState<FreePanelInfo | null>(null);
@@ -35,6 +36,16 @@ export const FreePanelScreen: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const unsubscribe = subscribeAppConfig((cfg) => {
+      setPanelInfo((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          downloadUrl: cfg.freeLink || prev.downloadUrl,
+        };
+      });
+    });
+    return () => unsubscribe();
   }, []);
 
   const handleCopy = (text: string, field: 'user' | 'pass') => {
@@ -172,15 +183,26 @@ export const FreePanelScreen: React.FC = () => {
             </div>
 
             {/* Download Panel Companion Action */}
-            <a
-              href={panelInfo.downloadUrl || 'https://dscauth.onrender.com/api/auth/download?plan=Free'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 hover:brightness-110 active:scale-95 transition-all shadow-md shadow-cyan-500/20"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download Free Panel APK / Companion</span>
-            </a>
+            {panelInfo.downloadUrl && panelInfo.downloadUrl.trim() !== '' ? (
+              <a
+                href={panelInfo.downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 hover:brightness-110 active:scale-95 transition-all shadow-md shadow-cyan-500/20"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download Free Panel APK / Companion</span>
+              </a>
+            ) : (
+              <button
+                disabled
+                className="w-full py-2.5 mt-1 rounded-xl bg-slate-800 text-slate-400 font-medium text-xs flex items-center justify-center gap-2 cursor-not-allowed border border-slate-700/60"
+                title="Free panel download link has not been configured by owner"
+              >
+                <AlertCircle className="w-4 h-4 text-amber-400/80" />
+                <span>Download Unavailable (Link Not Configured)</span>
+              </button>
+            )}
           </div>
 
           {/* Usage Policies Card */}

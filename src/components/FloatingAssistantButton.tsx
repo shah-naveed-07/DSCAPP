@@ -12,7 +12,7 @@ export const FloatingAssistantButton: React.FC<Props> = ({ onClick, isListening 
       <button
         onClick={onClick}
         className="group relative flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-full bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-white shadow-xl shadow-cyan-500/25 border border-cyan-400/40 hover:scale-105 active:scale-95 transition-all duration-300"
-        title="Open AI Voice Assistant"
+        title="Ask MJ"
       >
         {/* Glow backdrop pulse */}
         <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 to-purple-600 rounded-full blur opacity-40 group-hover:opacity-80 transition duration-300 animate-pulse" />
@@ -25,8 +25,8 @@ export const FloatingAssistantButton: React.FC<Props> = ({ onClick, isListening 
               <Bot className="w-3.5 h-3.5 text-cyan-300" />
             )}
           </div>
-          <span className="text-xs font-semibold tracking-wide text-slate-100 hidden sm:inline">
-            Voice AI
+          <span className="text-xs font-semibold tracking-wide text-slate-100">
+            Ask MJ
           </span>
           <span className="flex h-2 w-2 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />

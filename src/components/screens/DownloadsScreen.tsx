@@ -1,11 +1,22 @@
-import React, { useState } from 'react';
-import { Download, FileCode, Smartphone, Terminal, ChevronDown, ChevronUp, CheckCircle, ExternalLink } from 'lucide-react';
-import { DownloadItem } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { Download, FileCode, Smartphone, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle } from 'lucide-react';
+import { DownloadItem, SystemSettings } from '../../types';
+import { getAppConfig, subscribeAppConfig } from '../../services/api';
 
 export const DownloadsScreen: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<'All' | 'Android' | 'Panel' | 'Tools'>('All');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [config, setConfig] = useState<SystemSettings>(getAppConfig());
+  const [notice, setNotice] = useState<string | null>(null);
 
+  useEffect(() => {
+    const unsubscribe = subscribeAppConfig((newCfg) => {
+      setConfig(newCfg);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Dynamic download items populated exclusively from backend/owner configuration
   const downloads: DownloadItem[] = [
     {
       id: 'dsc-android-client',
@@ -14,7 +25,7 @@ export const DownloadsScreen: React.FC = () => {
       version: 'v1.0.0 (Release Build)',
       size: '28.4 MB',
       date: '2026-09-10',
-      downloadUrl: 'https://dscauth.onrender.com/downloads/dscweb-android-v1.0.0.apk',
+      downloadUrl: config.downloadLink || config.apkUrl || '',
       changelog: [
         'Initial official Android native Jetpack Compose release',
         'Direct DSCAuth integration with hardware Keystore token store',
@@ -29,7 +40,7 @@ export const DownloadsScreen: React.FC = () => {
       version: 'v2.4.1',
       size: '14.2 MB',
       date: '2026-09-08',
-      downloadUrl: 'https://dscauth.onrender.com/downloads/dsc-free-panel.apk',
+      downloadUrl: config.freeLink || '',
       changelog: [
         'Live slot availability detector',
         'Automatic credentials autofill',
@@ -43,7 +54,7 @@ export const DownloadsScreen: React.FC = () => {
       version: 'v4.1.0-Win64',
       size: '42.8 MB',
       date: '2026-08-25',
-      downloadUrl: 'https://dscauth.onrender.com/downloads/dsc-suite-v4.1.0.zip',
+      downloadUrl: '',
       changelog: [
         'Kernel driver signature refresh',
         'Hardware ID dynamic generator',
@@ -57,7 +68,7 @@ export const DownloadsScreen: React.FC = () => {
       version: 'v1.1.2',
       size: '3.6 MB',
       date: '2026-07-30',
-      downloadUrl: 'https://dscauth.onrender.com/downloads/dsc-hwid-tool.zip',
+      downloadUrl: '',
       changelog: [
         'Extracts device diagnostic telemetry safely without root',
         'Exports diagnostic report directly to clipboard',
@@ -68,16 +79,30 @@ export const DownloadsScreen: React.FC = () => {
   const filtered = activeCategory === 'All' ? downloads : downloads.filter((d) => d.category === activeCategory);
 
   const handleDownload = (item: DownloadItem) => {
-    // In browser preview, trigger download or show simulated download feedback
+    if (!item.downloadUrl || item.downloadUrl.trim() === '') {
+      setNotice(`Download for "${item.title}" is currently unavailable. No link has been configured by the owner.`);
+      setTimeout(() => setNotice(null), 4000);
+      return;
+    }
+
     const link = document.createElement('a');
     link.href = item.downloadUrl;
     link.download = `${item.id}.apk`;
     link.target = '_blank';
+    link.rel = 'noopener noreferrer';
     link.click();
   };
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8 text-slate-100 animate-fadeIn">
+      {/* Notice notification */}
+      {notice && (
+        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2 animate-fadeIn">
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="p-4 rounded-2xl bg-gradient-to-br from-[#121623] to-[#0c0f18] border border-[#232c45]">
         <div className="flex items-center gap-2 mb-1">
@@ -110,6 +135,7 @@ export const DownloadsScreen: React.FC = () => {
       <div className="flex flex-col gap-3">
         {filtered.map((item) => {
           const isExp = expandedId === item.id;
+          const isAvailable = Boolean(item.downloadUrl && item.downloadUrl.trim() !== '');
 
           return (
             <div
@@ -131,7 +157,11 @@ export const DownloadsScreen: React.FC = () => {
                         <span>•</span>
                         <span>{item.size}</span>
                         <span>•</span>
-                        <span>{item.date}</span>
+                        {isAvailable ? (
+                          <span className="text-emerald-400 font-semibold">Active</span>
+                        ) : (
+                          <span className="text-amber-400">Link Pending</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -166,13 +196,24 @@ export const DownloadsScreen: React.FC = () => {
                     {isExp ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
 
-                  <button
-                    onClick={() => handleDownload(item)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all shadow-sm shadow-cyan-500/20"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download Package</span>
-                  </button>
+                  {isAvailable ? (
+                    <button
+                      onClick={() => handleDownload(item)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all shadow-sm shadow-cyan-500/20"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Package</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleDownload(item)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 text-slate-400 border border-slate-700/60 font-medium text-xs hover:bg-slate-800 hover:text-slate-300 transition-all"
+                      title="Download link has not been configured by owner"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400/80" />
+                      <span>Download Unavailable</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

@@ -91,25 +91,63 @@ export default function App() {
     handleNavigate('home');
   };
 
-  const handleActionExecute = (actionCode: string, payload?: unknown) => {
+  const handleActionExecute = async (
+    actionCode: string,
+    payload?: unknown
+  ): Promise<{ success: boolean; message?: string }> => {
     switch (actionCode) {
       case 'LOGOUT':
         handleLogout();
-        break;
+        return { success: true, message: 'Logged out successfully.' };
       case 'START_DOWNLOAD':
         handleNavigate('downloads');
-        break;
-      case 'VIEW_DASHBOARD':
-        if (authState.role === 'Admin') {
-          handleNavigate('admin_dashboard');
-        } else if (authState.role === 'User') {
+        return { success: true, message: 'Opened Download Center.' };
+      case 'NAVIGATE_BACK':
+        handleBack();
+        return { success: true, message: 'Navigated back.' };
+      case 'COPY_USER_KEY':
+        window.dispatchEvent(new CustomEvent('user_copy_key'));
+        return { success: true, message: 'License key copied.' };
+      case 'OPEN_CHANGE_PASSWORD':
+        if (currentScreen !== 'user_dashboard') {
           handleNavigate('user_dashboard');
-        } else {
-          handleNavigate('user_login');
         }
-        break;
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('user_open_password_modal'));
+        }, 150);
+        return { success: true, message: 'Opened change password dialog.' };
+      case 'SEARCH_USER': {
+        const username = (payload as { username?: string })?.username || '';
+        if (currentScreen !== 'admin_dashboard') {
+          handleNavigate('admin_dashboard');
+        }
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('admin_search_user', { detail: { username } }));
+        }, 150);
+        return { success: true, message: `Searching user "${username}".` };
+      }
+      case 'OPEN_ADMIN_USERS':
+        if (currentScreen !== 'admin_dashboard') {
+          handleNavigate('admin_dashboard');
+        }
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('admin_switch_tab', { detail: { tab: 'users' } }));
+        }, 150);
+        return { success: true, message: 'Switched to Users tab.' };
+      case 'OPEN_ADMIN_ORDERS':
+        if (currentScreen !== 'admin_dashboard') {
+          handleNavigate('admin_dashboard');
+        }
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('admin_switch_tab', { detail: { tab: 'orders' } }));
+        }, 150);
+        return { success: true, message: 'Switched to Orders queue.' };
+      case 'REFRESH_CURRENT_SCREEN':
+        window.dispatchEvent(new CustomEvent('user_refresh_order'));
+        return { success: true, message: 'Screen refreshed.' };
       default:
         console.log('Assistant action executed:', actionCode, payload);
+        return { success: true };
     }
   };
 
@@ -185,6 +223,7 @@ export default function App() {
           currentScreen={currentScreen}
           session={session}
           onNavigate={handleNavigate}
+          onBack={handleBack}
           onActionExecute={handleActionExecute}
         />
 

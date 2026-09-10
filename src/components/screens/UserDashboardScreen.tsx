@@ -16,8 +16,8 @@ import {
   CheckCircle2,
   Package,
 } from 'lucide-react';
-import { UserOrder, UserSession } from '../../types';
-import { fetchUserOrder, userChangePassword } from '../../services/api';
+import { UserOrder, UserSession, SystemSettings } from '../../types';
+import { fetchUserOrder, userChangePassword, API_BASE_URL, getAppConfig, subscribeAppConfig } from '../../services/api';
 
 interface Props {
   session: UserSession;
@@ -30,6 +30,12 @@ export const UserDashboardScreen: React.FC<Props> = ({ session, onLogout }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const [config, setConfig] = useState<SystemSettings>(getAppConfig());
+
+  useEffect(() => {
+    const unsub = subscribeAppConfig((newCfg) => setConfig(newCfg));
+    return () => unsub();
+  }, []);
 
   // Change Password Dialog States
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -58,6 +64,32 @@ export const UserDashboardScreen: React.FC<Props> = ({ session, onLogout }) => {
   useEffect(() => {
     loadOrder();
   }, [session.token]);
+
+  useEffect(() => {
+    const handleCopyKeyEvent = () => {
+      if (order?.key) {
+        navigator.clipboard.writeText(order.key);
+        setCopiedKey(true);
+        setTimeout(() => setCopiedKey(false), 2500);
+      }
+    };
+    const handleOpenPassModal = () => {
+      setShowPasswordModal(true);
+    };
+    const handleRefreshOrder = () => {
+      handleRefresh();
+    };
+
+    window.addEventListener('user_copy_key', handleCopyKeyEvent);
+    window.addEventListener('user_open_password_modal', handleOpenPassModal);
+    window.addEventListener('user_refresh_order', handleRefreshOrder);
+
+    return () => {
+      window.removeEventListener('user_copy_key', handleCopyKeyEvent);
+      window.removeEventListener('user_open_password_modal', handleOpenPassModal);
+      window.removeEventListener('user_refresh_order', handleRefreshOrder);
+    };
+  }, [order]);
 
   const handleCopyKey = () => {
     if (order?.key) {
@@ -96,7 +128,7 @@ export const UserDashboardScreen: React.FC<Props> = ({ session, onLogout }) => {
     }
   };
 
-  const isFreeUser = order?.plan.toLowerCase().includes('free');
+  const isFreeUser = Boolean(order?.plan && String(order.plan).toLowerCase().includes('free'));
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8 text-slate-100 animate-fadeIn">
@@ -223,17 +255,31 @@ export const UserDashboardScreen: React.FC<Props> = ({ session, onLogout }) => {
 
           {/* Action Row: Download Panel & Change Password */}
           <div className="grid grid-cols-2 gap-2.5">
-            <a
-              href={`https://dscauth.onrender.com/api/auth/download?plan=${encodeURIComponent(
-                order.plan
-              )}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="py-3 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-95 transition-all shadow-md shadow-cyan-500/20 text-center"
-            >
-              <Download className="w-4 h-4 shrink-0" />
-              <span>Download Panel</span>
-            </a>
+            {order.plan ? (
+              <a
+                href={
+                  order.plan === 'Free' && config.freeLink
+                    ? config.freeLink
+                    : config.downloadLink
+                    ? config.downloadLink
+                    : `${API_BASE_URL}/api/auth/download?plan=${encodeURIComponent(order.plan)}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-3 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-95 transition-all shadow-md shadow-cyan-500/20 text-center"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>Download Panel</span>
+              </a>
+            ) : (
+              <button
+                disabled
+                className="py-3 px-3 rounded-xl bg-slate-800 text-slate-500 font-bold text-xs flex items-center justify-center gap-1.5 cursor-not-allowed border border-slate-700/60 text-center"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>Unavailable</span>
+              </button>
+            )}
 
             <button
               onClick={() => {
