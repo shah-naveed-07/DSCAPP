@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,11 +22,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -46,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dsc.dscweb.model.FreePanelInfo
 import com.dsc.dscweb.repository.PublicRepository
+import com.dsc.dscweb.ui.components.ErrorState
+import com.dsc.dscweb.ui.components.LoadingState
 import com.dsc.dscweb.ui.theme.AccentEmerald
 import com.dsc.dscweb.ui.theme.BorderDark
 import com.dsc.dscweb.ui.theme.PrimaryCyan
@@ -53,7 +54,6 @@ import com.dsc.dscweb.ui.theme.SurfaceCard
 import com.dsc.dscweb.ui.theme.SurfaceDark
 import com.dsc.dscweb.ui.theme.TextMuted
 import com.dsc.dscweb.ui.theme.TextPrimary
-import com.dsc.dscweb.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
 @Composable
@@ -64,12 +64,19 @@ fun FreePanelScreen(
     val scope = rememberCoroutineScope()
     var freeInfo by remember { mutableStateOf<FreePanelInfo?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     fun loadData() {
         scope.launch {
             isLoading = true
+            errorMessage = null
             val result = publicRepository.getFreePanelInfo()
-            freeInfo = result.getOrNull()
+            if (result.isSuccess) {
+                freeInfo = result.getOrNull()
+            } else {
+                freeInfo = null
+                errorMessage = "Free Panel temporarily unavailable."
+            }
             isLoading = false
         }
     }
@@ -88,8 +95,8 @@ fun FreePanelScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(SurfaceDark)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .background(SurfaceDark),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -123,25 +130,19 @@ fun FreePanelScreen(
             }
         }
 
-        if (isLoading && freeInfo == null) {
+        if (isLoading) {
             item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = PrimaryCyan)
-                }
+                LoadingState("Connecting to DSC Free Panel...")
+            }
+        } else if (freeInfo == null || errorMessage != null) {
+            item {
+                ErrorState(
+                    message = errorMessage ?: "Free Panel temporarily unavailable.",
+                    onRetry = { loadData() }
+                )
             }
         } else {
-            val info = freeInfo ?: FreePanelInfo(
-                username = "dsc_free_user",
-                password = "DSC_FreePass_2026",
-                remainingSlots = 14,
-                totalSlots = 50,
-                progress = 72
-            )
+            val info = freeInfo!!
 
             // Slot availability card
             item {
@@ -172,7 +173,10 @@ fun FreePanelScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        val progressFraction = (info.progress / 100f).coerceIn(0f, 1f)
+                        val progressFraction = if (info.totalSlots > 0) {
+                            (info.progress / 100f).coerceIn(0f, 1f)
+                        } else 0f
+
                         LinearProgressIndicator(
                             progress = progressFraction,
                             modifier = Modifier
@@ -186,7 +190,7 @@ fun FreePanelScreen(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
-                            text = "Slots are dynamically cycled and flushed every 24 hours.",
+                            text = if (info.message.isNotBlank()) info.message else "Slots are dynamically cycled and flushed every 24 hours.",
                             fontSize = 11.sp,
                             color = TextMuted
                         )
@@ -195,38 +199,43 @@ fun FreePanelScreen(
             }
 
             // Credentials dispenser card
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceCard)
-                        .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
-                        .padding(20.dp)
-                ) {
-                    Column {
-                        Text(
-                            text = "Active Free Credentials",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
+            if (info.username.isNotBlank() || info.password.isNotBlank()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(SurfaceCard)
+                            .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
+                            .padding(20.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "Active Free Credentials",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.height(14.dp))
 
-                        CredentialRow(
-                            label = "Username",
-                            value = info.username,
-                            onCopy = { copyToClipboard("Free Username", info.username) }
-                        )
+                            if (info.username.isNotBlank()) {
+                                CredentialRow(
+                                    label = "Username",
+                                    value = info.username,
+                                    onCopy = { copyToClipboard("Free Username", info.username) }
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
 
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        CredentialRow(
-                            label = "Password",
-                            value = info.password,
-                            onCopy = { copyToClipboard("Free Password", info.password) }
-                        )
+                            if (info.password.isNotBlank()) {
+                                CredentialRow(
+                                    label = "Password",
+                                    value = info.password,
+                                    onCopy = { copyToClipboard("Free Password", info.password) }
+                                )
+                            }
+                        }
                     }
                 }
             }

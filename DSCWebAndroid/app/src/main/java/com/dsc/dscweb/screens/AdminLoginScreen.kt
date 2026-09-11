@@ -111,7 +111,7 @@ fun AdminLoginScreen(
                 .background(SurfaceCard)
                 .border(1.dp, SecondaryPurple.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
                 .padding(24.dp),
-            horizontalAlignment = Alignment.CenterVertically
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
                 modifier = Modifier

@@ -1,11 +1,15 @@
 package com.dsc.dscweb.screens
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,22 +22,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,7 +40,6 @@ import com.dsc.dscweb.navigation.Screen
 import com.dsc.dscweb.ui.theme.AccentEmerald
 import com.dsc.dscweb.ui.theme.BorderDark
 import com.dsc.dscweb.ui.theme.PrimaryCyan
-import com.dsc.dscweb.ui.theme.SecondaryPurple
 import com.dsc.dscweb.ui.theme.SurfaceCard
 import com.dsc.dscweb.ui.theme.SurfaceDark
 import com.dsc.dscweb.ui.theme.TextMuted
@@ -52,14 +50,25 @@ import com.dsc.dscweb.ui.theme.TextSecondary
 fun HomeScreen(
     onNavigate: (Screen) -> Unit
 ) {
+    val context = LocalContext.current
+
+    fun openUrl(url: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "Opening link: $url", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(SurfaceDark)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .background(SurfaceDark),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 100.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Hero Section
+        // Hero Section matching index.html
         item {
             Box(
                 modifier = Modifier
@@ -71,34 +80,19 @@ fun HomeScreen(
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(PrimaryCyan.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Shield,
-                                contentDescription = null,
-                                tint = PrimaryCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "DARK SKULL CORPORATION",
-                            fontSize = 11.sp,
+                            text = "SECURITY OPERATIONS & ACCESS PORTAL",
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = PrimaryCyan,
                             letterSpacing = 1.sp
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "Native Android Security & Client Hub",
+                        text = "Software access, licensing, and client deployment.",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
@@ -108,22 +102,20 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Enterprise-grade authorization management, real-time telemetry, and automated credential delivery.",
+                        text = "Select your access tier, manage verified licenses, or access daily free panel slots with instant activation and secure authentication.",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         lineHeight = 18.sp
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    // Status pill row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         StatusBadge(title = "Server", value = "Online", color = AccentEmerald)
-                        StatusBadge(title = "Uptime", value = "99.98%", color = PrimaryCyan)
-                        StatusBadge(title = "Bypass", value = "Active", color = SecondaryPurple)
+                        StatusBadge(title = "DSCAuth", value = "Operational", color = PrimaryCyan)
                     }
                 }
             }
@@ -147,15 +139,13 @@ fun HomeScreen(
             ) {
                 QuickActionCard(
                     title = "Free Panel",
-                    subtitle = "Daily shared access",
-                    icon = Icons.Default.Key,
+                    subtitle = "Daily shared credentials",
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate(Screen.FreePanel) }
                 )
                 QuickActionCard(
-                    title = "VIP Plans",
-                    subtitle = "Premium subscriptions",
-                    icon = Icons.Default.ShoppingCart,
+                    title = "Products & Plans",
+                    subtitle = "VIP Subscriptions",
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate(Screen.Products) }
                 )
@@ -169,22 +159,59 @@ fun HomeScreen(
             ) {
                 QuickActionCard(
                     title = "Applications",
-                    subtitle = "Modules & Injectors",
-                    icon = Icons.Default.Apps,
+                    subtitle = "DSC Utility Suite",
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate(Screen.Apps) }
                 )
                 QuickActionCard(
                     title = "Downloads",
-                    subtitle = "Binaries & Tools",
-                    icon = Icons.Default.Download,
+                    subtitle = "Verified Assets",
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate(Screen.Downloads) }
                 )
             }
         }
 
-        // Live Security Telemetry
+        // Community Support Links Card
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(SurfaceCard)
+                    .border(1.dp, BorderDark, RoundedCornerShape(14.dp))
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Text(text = "Official Support & Community", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = "Connect with official DSC support desks on Discord and Telegram.", fontSize = 12.sp, color = TextMuted)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { openUrl("https://discord.gg/darkskull") },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Discord Desk", fontSize = 12.sp, color = SurfaceDark, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { openUrl("https://t.me/dscofficial") },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Telegram Channel", fontSize = 12.sp, color = TextPrimary)
+                        }
+                    }
+                }
+            }
+        }
+
+        // System Notice Card
         item {
             Box(
                 modifier = Modifier
@@ -197,14 +224,14 @@ fun HomeScreen(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.Speed,
+                            imageVector = Icons.Default.Info,
                             contentDescription = null,
-                            tint = AccentEmerald,
+                            tint = PrimaryCyan,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "DSC Security Status: Active & Secured",
+                            text = "Server System Notice",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = TextPrimary
@@ -212,7 +239,7 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Kernel bypass v3.5 is running with zero-trace injection. Memory signatures verified against Render backend.",
+                        text = "All authorization requests and Free Panel slots are processed directly via the official DSCAuth server.",
                         fontSize = 12.sp,
                         color = TextMuted,
                         lineHeight = 17.sp
@@ -224,7 +251,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun StatusBadge(title: String, value: String, color: androidx.compose.ui.graphics.Color) {
+private fun StatusBadge(title: String, value: String, color: Color) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
@@ -248,7 +275,6 @@ private fun StatusBadge(title: String, value: String, color: androidx.compose.ui
 private fun QuickActionCard(
     title: String,
     subtitle: String,
-    icon: ImageVector,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
@@ -261,19 +287,13 @@ private fun QuickActionCard(
             .padding(14.dp)
     ) {
         Column {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = PrimaryCyan,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = title,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = subtitle,
                 fontSize = 11.sp,

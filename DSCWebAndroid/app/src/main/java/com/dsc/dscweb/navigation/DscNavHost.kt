@@ -50,11 +50,16 @@ fun DscNavHost(
         }
 
         composable(Screen.Apps.route) {
-            AppsScreen()
+            AppsScreen(
+                onNavigateDownloads = { navController.navigate(Screen.Downloads.route) }
+            )
         }
 
         composable(Screen.Products.route) {
-            ProductsScreen()
+            ProductsScreen(
+                userRepository = userRepository,
+                onNavigateFreePanel = { navController.navigate(Screen.FreePanel.route) }
+            )
         }
 
         composable(Screen.FreePanel.route) {
@@ -62,7 +67,12 @@ fun DscNavHost(
         }
 
         composable(Screen.Downloads.route) {
-            DownloadsScreen()
+            DownloadsScreen(
+                userRepository = userRepository,
+                ownerRepository = ownerRepository,
+                onNavigateFreePanel = { navController.navigate(Screen.FreePanel.route) },
+                onNavigateApps = { navController.navigate(Screen.Apps.route) }
+            )
         }
 
         composable(Screen.UserLogin.route) {

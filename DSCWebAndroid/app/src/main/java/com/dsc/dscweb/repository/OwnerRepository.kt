@@ -4,10 +4,12 @@ import com.dsc.dscweb.data.SessionDataStore
 import com.dsc.dscweb.model.AdminAccount
 import com.dsc.dscweb.model.AdminKey
 import com.dsc.dscweb.model.AdminOrder
+import com.dsc.dscweb.model.AdminUser
+import com.dsc.dscweb.model.CreateAdminRequest
 import com.dsc.dscweb.model.CreateKeyRequest
 import com.dsc.dscweb.model.FreeUserRecord
-import com.dsc.dscweb.model.PanelStatusUpdate
-import com.dsc.dscweb.model.PanelUpdate
+import com.dsc.dscweb.model.PanelUpdateRecord
+import com.dsc.dscweb.model.PanelUpdateRequest
 import com.dsc.dscweb.model.SystemSettings
 import com.dsc.dscweb.network.DscAuthService
 import com.dsc.dscweb.network.NetworkResult
@@ -33,10 +35,10 @@ class OwnerRepository(
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(fallbackKeys)
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch keys (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(fallbackKeys)
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching keys")
         }
     }
 
@@ -48,10 +50,25 @@ class OwnerRepository(
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Key generated successfully.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to generate key")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to generate key", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error generating key")
+        }
+    }
+
+    suspend fun generateKey(plan: String, durationDays: Int): NetworkResult<String> = createKey(plan, durationDays)
+
+    suspend fun updateKey(key: AdminKey): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.updateKey(key)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Key updated.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update key", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating key")
         }
     }
 
@@ -61,10 +78,10 @@ class OwnerRepository(
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Key removed.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to delete key")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to delete key", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error deleting key")
         }
     }
 
@@ -74,14 +91,40 @@ class OwnerRepository(
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(fallbackAdmins)
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch admins (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(fallbackAdmins)
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching admins")
         }
     }
 
     suspend fun fetchAdmins(): NetworkResult<List<AdminAccount>> = getAdmins()
+
+    suspend fun createAdmin(username: String, password: String): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.createAdmin(CreateAdminRequest(username, password))
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Admin created successfully.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to create admin", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error creating admin")
+        }
+    }
+
+    suspend fun updateAdmin(admin: AdminAccount): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.updateAdmin(admin)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Admin account updated.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update admin account", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating admin account")
+        }
+    }
 
     suspend fun deleteAdmin(adminId: String): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
@@ -89,24 +132,25 @@ class OwnerRepository(
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Admin removed.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to delete admin")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to delete admin", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error deleting admin")
         }
     }
 
     suspend fun getSettings(): NetworkResult<SystemSettings> = withContext(Dispatchers.IO) {
         try {
             val res = service.getSettings()
-            if (res.isSuccessful && res.body() != null) {
-                dataStore.saveSystemSettings(res.body()!!)
-                NetworkResult.Success(res.body()!!)
+            if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                val s = res.body()!!.first()
+                dataStore.saveSystemSettings(s)
+                NetworkResult.Success(s)
             } else {
-                NetworkResult.Success(SystemSettings())
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch settings (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(SystemSettings())
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching settings")
         }
     }
 
@@ -117,39 +161,53 @@ class OwnerRepository(
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Settings saved successfully.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to save settings")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to save settings", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error saving settings")
         }
     }
 
-    suspend fun toggleMaintenance(): NetworkResult<Boolean> = withContext(Dispatchers.IO) {
+    suspend fun toggleMaintenance(enabled: Boolean? = null): NetworkResult<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val res = service.toggleMaintenance()
+            val targetState = enabled ?: run {
+                val current = getSettings().getOrNull()
+                !(current?.isMaintenanceMode == true || current?.maintenance == true)
+            }
+            val payload = mapOf("isMaintenanceMode" to targetState, "IsMaintenanceMode" to targetState)
+            val res = service.toggleMaintenance(payload)
             if (res.isSuccessful) {
-                val isMaint = res.body()?.maintenance == true
+                val isMaint = res.body()?.isMaintenanceMode == true || res.body()?.maintenance == true
                 NetworkResult.Success(isMaint)
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to toggle maintenance")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to toggle maintenance", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error toggling maintenance")
         }
     }
-
-    suspend fun toggleMaintenance(enabled: Boolean): NetworkResult<Boolean> = toggleMaintenance()
 
     suspend fun updateUserPass(user: String, pass: String, slots: Int): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
-            val currentSettings = getSettings().getOrNull() ?: SystemSettings()
-            updateSettings(
-                currentSettings.copy(
-                    announcement = "Free User: $user, Slots: $slots"
-                )
+            val settingsResult = getSettings()
+            val currentSettings = settingsResult.getOrNull() ?: SystemSettings()
+
+            val updatedSettings = currentSettings.copy(
+                freeUsername = user.trim(),
+                freePassword = pass,
+                maxFreeSlots = slots,
+                freeValidDays = 30
             )
+
+            val updateRes = updateSettings(updatedSettings)
+            if (updateRes is NetworkResult.Success) {
+                getSettings()
+                NetworkResult.Success(updateRes.data)
+            } else {
+                updateRes
+            }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating Global UserPass")
         }
     }
 
@@ -159,49 +217,37 @@ class OwnerRepository(
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(fallbackFreeUsers)
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch free users (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(fallbackFreeUsers)
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching free users")
+        }
+    }
+
+    suspend fun updateFreeUser(user: FreeUserRecord): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.updateFreeUser(user)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Free user updated.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update free user", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating free user")
         }
     }
 
     suspend fun deleteFreeUser(freeUserId: String): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
-            val res = service.deleteFreeUser(freeUserId)
+            val idInt = freeUserId.toIntOrNull() ?: 0
+            val res = service.deleteFreeUser(idInt.toString())
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Free user slot released.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to remove free user")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to remove free user", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
-        }
-    }
-
-    suspend fun getPanelStatus(): NetworkResult<PanelStatusUpdate> = withContext(Dispatchers.IO) {
-        try {
-            val res = service.getPanelStatus()
-            if (res.isSuccessful && res.body() != null) {
-                NetworkResult.Success(res.body()!!)
-            } else {
-                NetworkResult.Success(PanelStatusUpdate())
-            }
-        } catch (e: Exception) {
-            NetworkResult.Success(PanelStatusUpdate())
-        }
-    }
-
-    suspend fun savePanelStatus(status: PanelStatusUpdate): NetworkResult<String> = withContext(Dispatchers.IO) {
-        try {
-            val res = service.savePanelStatus(status)
-            if (res.isSuccessful) {
-                NetworkResult.Success(res.body()?.message ?: "Panel updates saved.")
-            } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to save panel status")
-            }
-        } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error removing free user")
         }
     }
 
@@ -211,34 +257,102 @@ class OwnerRepository(
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(fallbackAllOrders)
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch all orders (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(fallbackAllOrders)
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching orders")
         }
     }
 
-    private val fallbackKeys = listOf(
-        AdminKey(id = "key-1", key = "DSC-PLAT-7712-B8X0-112A", plan = "Platinum Elite", durationDays = 30, status = "unused", createdAt = "2026-09-01"),
-        AdminKey(id = "key-2", key = "DSC-GOLD-4412-K9L1-889P", plan = "Gold VIP", durationDays = 60, status = "used", usedBy = "night_blade", createdAt = "2026-08-20"),
-        AdminKey(id = "key-3", key = "DSC-SILV-1190-Z3Q2-441K", plan = "Silver Regular", durationDays = 14, status = "unused", createdAt = "2026-09-05")
-    )
+    suspend fun updateOrder(order: AdminOrder): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.updateOrder(order)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Order updated.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update order", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating order")
+        }
+    }
 
-    private val fallbackAdmins = listOf(
-        AdminAccount(id = "adm-1", username = "admin", role = "Owner", isOwner = true, createdAt = "2025-01-01"),
-        AdminAccount(id = "adm-2", username = "dsc_moderator", role = "Admin", isOwner = false, createdAt = "2026-02-14"),
-        AdminAccount(id = "adm-3", username = "support_lead", role = "Admin", isOwner = false, createdAt = "2026-06-01")
-    )
+    suspend fun deleteOrder(orderId: String): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.deleteOrder(orderId)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Order deleted.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to delete order", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error deleting order")
+        }
+    }
 
-    private val fallbackFreeUsers = listOf(
-        FreeUserRecord(id = "free-1", username = "free_agent_01", isBanned = false, failedLoginAttempts = 0, firstLoginTime = "2026-09-08 10:20", lastLoginTime = "2026-09-10 14:15"),
-        FreeUserRecord(id = "free-2", username = "free_agent_02", isBanned = false, failedLoginAttempts = 1, firstLoginTime = "2026-09-09 11:00", lastLoginTime = "2026-09-10 09:30"),
-        FreeUserRecord(id = "free-3", username = "free_agent_03", isBanned = true, failedLoginAttempts = 4, firstLoginTime = "2026-09-05 18:40", lastLoginTime = "2026-09-07 22:10")
-    )
+    suspend fun getUsers(): NetworkResult<List<AdminUser>> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.getAdminUsers()
+            if (res.isSuccessful && res.body() != null) {
+                NetworkResult.Success(res.body()!!)
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch users (${res.code()})", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching users")
+        }
+    }
 
-    private val fallbackAllOrders = listOf(
-        AdminOrder(id = "ord-101", username = "viper_lead", plan = "Platinum Elite (30 Days)", price = "$69.99", status = "pending", createdAt = "2026-09-09 18:22"),
-        AdminOrder(id = "ord-102", username = "matrix_apex", plan = "Gold VIP (60 Days)", price = "$119.99", status = "approved", createdAt = "2026-09-08 14:05"),
-        AdminOrder(id = "ord-103", username = "ghost_pulse", plan = "Silver Regular (14 Days)", price = "$29.99", status = "pending", createdAt = "2026-09-10 08:30")
-    )
+    suspend fun updateUser(user: AdminUser): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.updateAdminUser(user)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "User updated.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update user", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating user")
+        }
+    }
+
+    suspend fun deleteUser(userId: String): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.deleteAdminUser(userId)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "User deleted.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to delete user", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error deleting user")
+        }
+    }
+
+    suspend fun getPanelUpdates(): NetworkResult<PanelUpdateRecord> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.getPanelUpdates()
+            if (res.isSuccessful && res.body() != null) {
+                NetworkResult.Success(res.body()!!)
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch panel updates", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching panel updates")
+        }
+    }
+
+    suspend fun savePanelUpdates(update1: String, update2: String, update3: String, update4: String): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val req = PanelUpdateRequest(update1, update2, update3, update4)
+            val res = service.savePanelUpdates(req)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Panel updates saved successfully.")
+            } else {
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to save panel updates", res.code())
+            }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error saving panel updates")
+        }
+    }
 }

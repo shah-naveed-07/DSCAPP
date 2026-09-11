@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,17 +23,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -59,16 +55,16 @@ import com.dsc.dscweb.auth.UserSession
 import com.dsc.dscweb.model.UserOrder
 import com.dsc.dscweb.network.NetworkResult
 import com.dsc.dscweb.repository.UserRepository
+import com.dsc.dscweb.ui.components.ErrorState
+import com.dsc.dscweb.ui.components.LoadingState
 import com.dsc.dscweb.ui.theme.AccentEmerald
 import com.dsc.dscweb.ui.theme.AccentRose
 import com.dsc.dscweb.ui.theme.BorderDark
 import com.dsc.dscweb.ui.theme.PrimaryCyan
-import com.dsc.dscweb.ui.theme.SecondaryPurple
 import com.dsc.dscweb.ui.theme.SurfaceCard
 import com.dsc.dscweb.ui.theme.SurfaceDark
 import com.dsc.dscweb.ui.theme.TextMuted
 import com.dsc.dscweb.ui.theme.TextPrimary
-import com.dsc.dscweb.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
 @Composable
@@ -82,17 +78,30 @@ fun UserDashboardScreen(
 
     var userOrder by remember { mutableStateOf<UserOrder?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     var showChangePassDialog by remember { mutableStateOf(false) }
 
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var isChangingPass by remember { mutableStateOf(false) }
 
+    fun loadOrder() {
+        scope.launch {
+            isLoading = true
+            errorMessage = null
+            val res = userRepository.fetchMyOrder()
+            if (res.isSuccess) {
+                userOrder = res.getOrNull()
+            } else {
+                userOrder = null
+                errorMessage = "Subscription order details temporarily unavailable."
+            }
+            isLoading = false
+        }
+    }
+
     LaunchedEffect(session.token) {
-        isLoading = true
-        val res = userRepository.fetchMyOrder()
-        userOrder = res.getOrNull()
-        isLoading = false
+        loadOrder()
     }
 
     fun copyKey(key: String) {
@@ -105,8 +114,8 @@ fun UserDashboardScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(SurfaceDark)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .background(SurfaceDark),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Welcome Header
@@ -169,73 +178,88 @@ fun UserDashboardScreen(
         }
 
         // Subscription Details Card
-        item {
-            val order = userOrder ?: UserOrder(
-                username = session.username,
-                plan = "Gold VIP Plan",
-                expiry = "2026-12-31",
-                key = "DSC-GOLD-9842-X7B1-99A0",
-                orderId = "ORD-2026-88412"
-            )
+        if (isLoading) {
+            item {
+                LoadingState("Fetching subscription details...")
+            }
+        } else if (userOrder != null) {
+            val order = userOrder!!
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SurfaceCard)
-                    .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
-                    .padding(20.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "Active Subscription Details",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(SurfaceCard)
+                        .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
+                        .padding(20.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "Active Subscription Details",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    DetailItem(label = "VIP Tier", value = order.plan, color = PrimaryCyan)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    DetailItem(label = "Expiration Date", value = order.expiry.take(10), color = TextPrimary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    DetailItem(label = "Order Reference", value = order.orderId, color = TextMuted)
-
-                    if (!order.key.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(14.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(SurfaceDark)
-                                .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-                                .padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("LICENSE KEY", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = order.key,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = PrimaryCyan
-                                )
-                            }
-                            OutlinedButton(
-                                onClick = { copyKey(order.key) },
-                                shape = RoundedCornerShape(6.dp)
+
+                        if (order.plan.isNotBlank()) {
+                            DetailItem(label = "VIP Tier", value = order.plan, color = PrimaryCyan)
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        if (order.expiry.isNotBlank()) {
+                            DetailItem(label = "Expiration Date", value = order.expiry.take(10), color = TextPrimary)
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        if (order.orderId.isNotBlank()) {
+                            DetailItem(label = "Order Reference", value = order.orderId, color = TextMuted)
+                        }
+
+                        if (!order.key.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(SurfaceDark)
+                                    .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = "Copy Key",
-                                    tint = PrimaryCyan,
-                                    modifier = Modifier.size(12.dp)
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("LICENSE KEY", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = order.key,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = PrimaryCyan
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = { copyKey(order.key) },
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy Key",
+                                        tint = PrimaryCyan,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
+            }
+        } else {
+            item {
+                ErrorState(
+                    message = errorMessage ?: "No active subscription details found.",
+                    onRetry = { loadOrder() }
+                )
             }
         }
 
@@ -284,7 +308,7 @@ fun UserDashboardScreen(
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Logout,
+                            imageVector = Icons.AutoMirrored.Filled.Logout,
                             contentDescription = null,
                             tint = AccentRose,
                             modifier = Modifier.size(16.dp)

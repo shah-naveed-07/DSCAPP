@@ -109,7 +109,7 @@ fun UserRegisterScreen(
                 .background(SurfaceCard)
                 .border(1.dp, BorderDark, RoundedCornerShape(16.dp))
                 .padding(24.dp),
-            horizontalAlignment = Alignment.CenterVertically
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
                 modifier = Modifier

@@ -65,7 +65,7 @@ fun DscBottomNavBar(
                     .clip(RoundedCornerShape(8.dp))
                     .clickable { onNavigate(screen) }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalAlignment = Alignment.CenterVertically
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
                     imageVector = icon,

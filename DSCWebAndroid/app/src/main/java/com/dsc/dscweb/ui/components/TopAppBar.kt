@@ -41,7 +41,7 @@ import com.dsc.dscweb.ui.theme.TextPrimary
 fun DscTopAppBar(
     currentTitle: String,
     session: UserSession?,
-    onOpenMj: () -> Unit,
+    onOpenAiora: () -> Unit,
     onNavigateUserPortal: () -> Unit,
     onNavigateStaffPortal: () -> Unit
 ) {
@@ -86,6 +86,15 @@ fun DscTopAppBar(
             fontSize = 18.sp,
             color = PrimaryCyan
         )
+        if (currentTitle.isNotBlank()) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "• $currentTitle",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
+                color = TextMuted
+            )
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -118,25 +127,25 @@ fun DscTopAppBar(
             Spacer(modifier = Modifier.width(8.dp))
         }
 
-        // Ask MJ Button
+        // Ask Aiora Button
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
                 .background(SurfaceCard)
                 .border(1.dp, PrimaryCyan.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                .clickable { onOpenMj() }
+                .clickable { onOpenAiora() }
                 .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = Icons.Default.AutoAwesome,
-                contentDescription = "Ask MJ",
+                contentDescription = "Ask Aiora",
                 tint = PrimaryCyan,
                 modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = "Ask MJ",
+                text = "Ask Aiora",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary

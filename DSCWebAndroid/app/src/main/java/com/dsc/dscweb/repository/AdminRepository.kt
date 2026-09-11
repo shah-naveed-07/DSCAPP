@@ -18,10 +18,10 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(SystemStatus(maintenance = false, message = "Systems operational", version = "2.4.1-android", uptime = "99.98%"))
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch system status (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(SystemStatus(maintenance = false, message = "Systems operational (Offline Cache)", version = "2.4.1-android", uptime = "99.98%"))
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching system status")
         }
     }
 
@@ -31,10 +31,10 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(fallbackUsers)
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch users list (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(fallbackUsers)
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching users")
         }
     }
 
@@ -44,10 +44,23 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "User updated.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update user")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update user", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating user")
+        }
+    }
+
+    suspend fun banUser(user: AdminUser): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.banAdminUser(user)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "User ban status updated.")
+            } else {
+                updateUser(user)
+            }
+        } catch (_: Exception) {
+            updateUser(user)
         }
     }
 
@@ -57,10 +70,10 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "User removed.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to remove user")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to remove user", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error removing user")
         }
     }
 
@@ -70,19 +83,59 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(fallbackOrders)
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to fetch pending orders (${res.code()})", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(fallbackOrders)
+            NetworkResult.Error(e.localizedMessage ?: "Network error fetching pending orders")
+        }
+    }
+
+    suspend fun fetchAllOrders(): NetworkResult<List<AdminOrder>> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.getAllOrders()
+            if (res.isSuccessful && res.body() != null) {
+                NetworkResult.Success(res.body()!!)
+            } else {
+                fetchPendingOrders()
+            }
+        } catch (_: Exception) {
+            fetchPendingOrders()
         }
     }
 
     suspend fun fetchOrders(): NetworkResult<List<AdminOrder>> = fetchPendingOrders()
 
     suspend fun setUserBanned(username: String, banned: Boolean): NetworkResult<String> = withContext(Dispatchers.IO) {
-        val user = fetchUsers().getOrNull()?.find { it.username.equals(username, ignoreCase = true) }
+        val userRes = fetchUsers()
+        val user = userRes.getOrNull()?.find { it.username.equals(username, ignoreCase = true) }
         val updated = (user ?: AdminUser(username = username)).copy(status = if (banned) "banned" else "active")
-        updateUser(updated)
+        banUser(updated)
+    }
+
+    suspend fun approveOrder(orderId: String): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.approveOrder(orderId)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Order approved.")
+            } else {
+                updateOrderDecision(orderId, "approve")
+            }
+        } catch (_: Exception) {
+            updateOrderDecision(orderId, "approve")
+        }
+    }
+
+    suspend fun rejectOrder(orderId: String): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = service.rejectOrder(orderId)
+            if (res.isSuccessful) {
+                NetworkResult.Success(res.body()?.message ?: "Order rejected.")
+            } else {
+                updateOrderDecision(orderId, "reject")
+            }
+        } catch (_: Exception) {
+            updateOrderDecision(orderId, "reject")
+        }
     }
 
     suspend fun updateOrderDecision(orderId: String, mode: String): NetworkResult<String> = withContext(Dispatchers.IO) {
@@ -91,10 +144,10 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Order $mode finished.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update order")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to update order", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error updating order")
         }
     }
 
@@ -104,10 +157,10 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Admin created successfully.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to create admin")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to create admin", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error creating admin")
         }
     }
 
@@ -117,22 +170,10 @@ class AdminRepository(private val service: DscAuthService) {
             if (res.isSuccessful) {
                 NetworkResult.Success(res.body()?.message ?: "Admin password updated.")
             } else {
-                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to change password")
+                NetworkResult.Error(res.errorBody()?.string() ?: "Failed to change password", res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Error(e.localizedMessage ?: "Network error")
+            NetworkResult.Error(e.localizedMessage ?: "Network error changing password")
         }
     }
-
-    private val fallbackUsers = listOf(
-        AdminUser(id = "usr-1", username = "cyber_phantom", plan = "Platinum Elite", expiry = "2026-11-20", status = "active"),
-        AdminUser(id = "usr-2", username = "night_blade", plan = "Gold VIP", expiry = "2026-10-14", status = "active"),
-        AdminUser(id = "usr-3", username = "neon_pulse", plan = "Silver Regular", expiry = "2026-08-01", status = "expired"),
-        AdminUser(id = "usr-4", username = "zero_cool", plan = "Free Panel", expiry = "2026-09-30", status = "active")
-    )
-
-    private val fallbackOrders = listOf(
-        AdminOrder(id = "ORD-9921", username = "shadow_hunter", plan = "Platinum Elite (30 Days)", price = "$45.00", status = "pending", createdAt = "2026-09-09 18:22"),
-        AdminOrder(id = "ORD-9924", username = "matrix_recon", plan = "Gold VIP (90 Days)", price = "$79.00", status = "pending", createdAt = "2026-09-10 03:11")
-    )
 }

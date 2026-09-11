@@ -14,21 +14,12 @@ class PublicRepository(private val service: DscAuthService) {
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                NetworkResult.Success(fallbackFreePanel)
+                val errMessage = res.errorBody()?.string()?.ifBlank { null }
+                    ?: "Free Panel temporarily unavailable (${res.code()})"
+                NetworkResult.Error(errMessage, res.code())
             }
         } catch (e: Exception) {
-            NetworkResult.Success(fallbackFreePanel)
+            NetworkResult.Error(e.localizedMessage ?: "Free Panel temporarily unavailable. Network connection error.")
         }
     }
-
-    private val fallbackFreePanel = FreePanelInfo(
-        available = true,
-        username = "dsc_free_user",
-        password = "DSC_FreePass_2026",
-        remainingSlots = 14,
-        totalSlots = 50,
-        progress = 72,
-        downloadUrl = "",
-        message = "Free access slots currently active."
-    )
 }

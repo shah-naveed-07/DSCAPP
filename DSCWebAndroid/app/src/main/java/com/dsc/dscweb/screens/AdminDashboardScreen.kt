@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,7 +22,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -54,9 +54,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.automirrored.filled.Logout
 import com.dsc.dscweb.auth.UserSession
-import com.dsc.dscweb.model.Order
-import com.dsc.dscweb.model.UserRecord
+import com.dsc.dscweb.model.AdminOrder
+import com.dsc.dscweb.model.AdminUser
 import com.dsc.dscweb.network.NetworkResult
 import com.dsc.dscweb.repository.AdminRepository
 import com.dsc.dscweb.ui.components.DscConfirmationDialog
@@ -83,8 +84,8 @@ fun AdminDashboardScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var userList by remember { mutableStateOf<List<UserRecord>>(emptyList()) }
-    var orderList by remember { mutableStateOf<List<Order>>(emptyList()) }
+    var userList by remember { mutableStateOf<List<AdminUser>>(emptyList()) }
+    var orderList by remember { mutableStateOf<List<AdminOrder>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
 
@@ -115,8 +116,8 @@ fun AdminDashboardScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(SurfaceDark)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .background(SurfaceDark),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Staff Header
@@ -380,7 +381,7 @@ fun AdminDashboardScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "${order.username} (${order.orderId})",
+                                    text = "${order.username} (${order.id.ifBlank { "ORD-REF" }})",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
@@ -397,7 +398,7 @@ fun AdminDashboardScreen(
                                     Button(
                                         onClick = {
                                             scope.launch {
-                                                adminRepository.approveOrder(order.orderId)
+                                                adminRepository.approveOrder(order.id)
                                                 Toast.makeText(context, "Order approved!", Toast.LENGTH_SHORT).show()
                                                 refreshData()
                                             }
@@ -411,7 +412,7 @@ fun AdminDashboardScreen(
                                     Button(
                                         onClick = {
                                             scope.launch {
-                                                adminRepository.rejectOrder(order.orderId)
+                                                adminRepository.rejectOrder(order.id)
                                                 Toast.makeText(context, "Order rejected", Toast.LENGTH_SHORT).show()
                                                 refreshData()
                                             }
@@ -439,7 +440,7 @@ fun AdminDashboardScreen(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Logout,
+                    imageVector = Icons.AutoMirrored.Filled.Logout,
                     contentDescription = null,
                     tint = AccentRose,
                     modifier = Modifier.size(16.dp)
