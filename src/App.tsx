@@ -21,6 +21,14 @@ import { TermsScreen } from './components/screens/TermsScreen';
 import { AndroidCodeModal } from './components/AndroidCodeModal';
 import { AIAssistantSheet } from './components/AIAssistantSheet';
 import { FloatingAssistantButton } from './components/FloatingAssistantButton';
+import { MicrophonePermissionModal } from './components/MicrophonePermissionModal';
+import {
+  wakeWordEngine,
+  isWakeWordEnabled,
+  setWakeWordEnabled,
+  WakeWordState,
+  WakeWordEvent,
+} from './services/wakeWordService';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenDestination>('home');
@@ -28,6 +36,10 @@ export default function App() {
   const [authState, setAuthState] = useState<AuthState>(AuthManager.getState());
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [showAssistant, setShowAssistant] = useState(false);
+  const [wakeWordEnabled, setWakeEnabledState] = useState<boolean>(isWakeWordEnabled());
+  const [wakeWordState, setWakeWordState] = useState<WakeWordState>(wakeWordEngine.getState());
+  const [pendingWakeEvent, setPendingWakeEvent] = useState<WakeWordEvent | null>(null);
+  const [showMicPermissionModal, setShowMicPermissionModal] = useState(false);
 
   // Subscribe to centralized AuthManager as the single source of truth
   useEffect(() => {
@@ -36,6 +48,43 @@ export default function App() {
     });
     return unsubscribe;
   }, []);
+
+  // Initialize and connect Voice Wake-Word Engine ("Hey MJ" / "MJ")
+  useEffect(() => {
+    wakeWordEngine.onWakeWordDetected = (event: WakeWordEvent) => {
+      // Wake up assistant immediately without button press
+      setShowAssistant(true);
+      setPendingWakeEvent(event);
+    };
+
+    wakeWordEngine.onStateChanged = (state: WakeWordState) => {
+      setWakeWordState(state);
+    };
+
+    if (wakeWordEnabled) {
+      wakeWordEngine.start();
+    }
+
+    return () => {
+      wakeWordEngine.stop();
+    };
+  }, []);
+
+  const handleToggleWakeWord = () => {
+    if (wakeWordEnabled) {
+      setWakeWordEnabled(false);
+      setWakeEnabledState(false);
+      wakeWordEngine.stop();
+    } else {
+      setShowMicPermissionModal(true);
+    }
+  };
+
+  const handleMicPermissionGranted = () => {
+    setWakeWordEnabled(true);
+    setWakeEnabledState(true);
+    wakeWordEngine.start();
+  };
 
   // Section 10: Session Startup Workflow
   useEffect(() => {
@@ -213,8 +262,12 @@ export default function App() {
           session={session}
         />
 
-        {/* Floating AI Voice Assistant Button */}
-        <FloatingAssistantButton onClick={() => setShowAssistant(true)} />
+        {/* Floating AI Voice Assistant Button with Wake Status */}
+        <FloatingAssistantButton
+          onClick={() => setShowAssistant(true)}
+          wakeState={wakeWordState}
+          wakeEnabled={wakeWordEnabled}
+        />
 
         {/* AI Voice Assistant Sheet */}
         <AIAssistantSheet
@@ -225,6 +278,18 @@ export default function App() {
           onNavigate={handleNavigate}
           onBack={handleBack}
           onActionExecute={handleActionExecute}
+          wakeWordEnabled={wakeWordEnabled}
+          wakeWordState={wakeWordState}
+          onToggleWakeWord={handleToggleWakeWord}
+          pendingWakeEvent={pendingWakeEvent}
+          onClearPendingWakeEvent={() => setPendingWakeEvent(null)}
+        />
+
+        {/* Microphone Permission Modal */}
+        <MicrophonePermissionModal
+          isOpen={showMicPermissionModal}
+          onClose={() => setShowMicPermissionModal(false)}
+          onGranted={handleMicPermissionGranted}
         />
 
         {/* Native Android Project Code Modal */}

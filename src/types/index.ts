@@ -19,11 +19,17 @@ export interface UserOrder {
 
 export interface FreePanelInfo {
   available: boolean;
-  username?: string;
+  slotsFull: boolean;
+  username: string;
   password?: string;
+  freeUser: string;
+  freePass: string;
+  usedSlots: number;
+  maxSlots: number;
   remainingSlots: number;
   totalSlots: number;
   progress: number;
+  freeLink: string;
   downloadUrl?: string;
   message?: string;
 }
@@ -93,30 +99,33 @@ export interface SystemStatus {
 }
 
 export interface SystemSettings {
-  registrationOpen?: boolean;
-  freePanelActive?: boolean;
-  defaultDurationDays?: number;
-  announcement?: string;
-  supportDiscord?: string;
-  supportTelegram?: string;
-  freeLink?: string;
-  showHomeDownloadBtn?: boolean;
-  downloadLink?: string;
-  apkUrl?: string;
-  maintenance?: boolean;
+  id?: number | string;
+  isMaintenanceMode?: boolean;
+  maintenanceReason?: string;
+  maxFreeSlots?: number | string;
   latestVersion?: string;
   updateUrl?: string;
-  maintenanceReason?: string;
+  showHomeDownloadBtn?: boolean;
+  freeValidDays?: number | string;
   freeUsername?: string;
   freePassword?: string;
-  maxFreeSlots?: number | string;
-  freeValidDays?: number | string;
+  freeLink?: string;
   streamerLink?: string;
   sniperLink?: string;
   specialLink?: string;
   aimbotLink?: string;
   premiumLink?: string;
   customisedLink?: string;
+  // Aliases and UI backward compatibility
+  maintenance?: boolean;
+  downloadLink?: string;
+  apkUrl?: string;
+  registrationOpen?: boolean;
+  freePanelActive?: boolean;
+  defaultDurationDays?: number;
+  announcement?: string;
+  supportDiscord?: string;
+  supportTelegram?: string;
   [key: string]: unknown;
 }
 

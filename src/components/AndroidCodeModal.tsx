@@ -38,7 +38,7 @@ export const AndroidCodeModal: React.FC<Props> = ({ onClose }) => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error('Failed to generate ZIP project:', err);
+      console.warn('Failed to generate ZIP project:', err);
     } finally {
       setIsZipping(false);
     }

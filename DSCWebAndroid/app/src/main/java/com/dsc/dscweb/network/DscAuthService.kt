@@ -111,7 +111,7 @@ interface DscAuthService {
     @GET("api/admin/settings/all")
     suspend fun getSettings(): Response<SystemSettings>
 
-    @POST("api/admin/settings/update")
+    @PUT("api/admin/settings/update")
     suspend fun updateSettings(@Body settings: SystemSettings): Response<GenericMessageResponse>
 
     @POST("api/admin/maintenance/toggle")

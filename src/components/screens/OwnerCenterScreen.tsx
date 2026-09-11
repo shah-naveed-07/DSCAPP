@@ -29,6 +29,7 @@ import {
   Sparkles,
   Info,
   Copy,
+  Edit3,
 } from 'lucide-react';
 import {
   AdminAccount,
@@ -65,6 +66,10 @@ import {
   ownerGetAllOrders,
   ownerProcessOrder,
   ownerDeleteOrder,
+  checkOwnerAccess,
+  getSystemSettings,
+  updateSystemSettings,
+  toggleMaintenance,
 } from '../../services/api';
 
 type OwnerSection =
@@ -88,6 +93,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Owner Authorization Verification State (Section 6)
+  const [ownerAccess, setOwnerAccess] = useState<'checking' | 'authorized' | 'denied'>('checking');
+  const [probeError, setProbeError] = useState<string | null>(null);
 
   // Data Stores
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -132,7 +141,7 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [newAdminRole, setNewAdminRole] = useState<'Admin' | 'Owner'>('Admin');
 
-  // Settings Edit State
+  // Settings Edit State (Mapped strictly to DSCAuth system settings contract)
   const [editLatestVersion, setEditLatestVersion] = useState('3.5');
   const [editDownloadLink, setEditDownloadLink] = useState('');
   const [editFreeLink, setEditFreeLink] = useState('');
@@ -152,7 +161,13 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
   const [globalMaxFreeSlots, setGlobalMaxFreeSlots] = useState<number | string>(50);
   const [globalFreeValidDays, setGlobalFreeValidDays] = useState<number | string>(1);
   const [showGlobalPassConfirm, setShowGlobalPassConfirm] = useState(false);
+  const [globalPassConfirmDetails, setGlobalPassConfirmDetails] = useState<{
+    isClearing: boolean;
+    user: AdminUser | null;
+  } | null>(null);
   const [isSavingGlobalPass, setIsSavingGlobalPass] = useState(false);
+  const [editingFreeUser, setEditingFreeUser] = useState<FreeUserRecord | null>(null);
+  const [isSavingFreeUser, setIsSavingFreeUser] = useState(false);
 
   // Live Panel Status State
   const [statusUpdate1, setStatusUpdate1] = useState('');
@@ -161,7 +176,69 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
   const [statusUpdate4, setStatusUpdate4] = useState('');
   const [isSavingPanelStatus, setIsSavingPanelStatus] = useState(false);
 
-  // Initial Data Fetching
+  // Settings Diagnostic & Live State
+  const [settingsLoadStatus, setSettingsLoadStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [settingsLoadError, setSettingsLoadError] = useState<{
+    method: string;
+    url: string;
+    status: number;
+    message: string;
+  } | null>(null);
+
+  // Dedicated direct fetch for GET /api/admin/settings/all
+  const fetchSettingsDirectly = async () => {
+    setSettingsLoadStatus('loading');
+    setSettingsLoadError(null);
+    try {
+      const res = await getSystemSettings(session.token);
+      if (res.settings) {
+        const s = res.settings;
+        setSettings(s);
+        setSettingsLoadStatus('success');
+        setSettingsLoadError(null);
+
+        // Section 7: populate server values
+        setGlobalFreeUsername(s.freeUsername || '');
+        setGlobalFreePassword(s.freePassword || '');
+        setGlobalMaxFreeSlots(s.maxFreeSlots ?? 50);
+        setGlobalFreeValidDays(s.freeValidDays ?? 1);
+
+        // Section 9: populate download and link fields from server record
+        setEditLatestVersion(s.latestVersion || '3.5');
+        setEditDownloadLink(s.updateUrl || s.downloadLink || s.apkUrl || '');
+        setEditFreeLink(s.freeLink || '');
+        setEditMaintenanceReason(s.maintenanceReason || 'Panel Is Ready to use');
+        setEditShowHomeDownloadBtn(Boolean(s.showHomeDownloadBtn));
+        setEditStreamerLink(s.streamerLink || '');
+        setEditSniperLink(s.sniperLink || '');
+        setEditSpecialLink(s.specialLink || '');
+        setEditAimbotLink(s.aimbotLink || '');
+        setEditPremiumLink(s.premiumLink || '');
+        setEditCustomisedLink(s.customisedLink || '');
+      } else {
+        setSettingsLoadStatus('error');
+        setSettingsLoadError({
+          method: res.method || 'GET',
+          url: res.url || 'https://dscauth.onrender.com/api/admin/settings/all',
+          status: res.status,
+          message: res.error || 'Failed to retrieve settings from DSCAuth backend.',
+        });
+        setErrorMessage(res.error);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSettingsLoadStatus('error');
+      setSettingsLoadError({
+        method: 'GET',
+        url: 'https://dscauth.onrender.com/api/admin/settings/all',
+        status: 0,
+        message: msg,
+      });
+      setErrorMessage(msg);
+    }
+  };
+
+  // Initial Data Fetching from Database
   const loadAll = async () => {
     setLoading(true);
     setErrorMessage(null);
@@ -181,7 +258,7 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
         ownerGetKeys(session.token),
         ownerGetAdmins(session.token),
         ownerGetAllOrders(session.token),
-        ownerGetSettings(session.token),
+        getSystemSettings(session.token),
         ownerGetPanelUpdates(session.token),
         ownerGetPanelStatus(session.token),
       ]);
@@ -204,8 +281,11 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
       if (settingsRes.settings) {
         const s = settingsRes.settings;
         setSettings(s);
+        setSettingsLoadStatus('success');
+        setSettingsLoadError(null);
+
         setEditLatestVersion(s.latestVersion || '3.5');
-        setEditDownloadLink(s.downloadLink || s.apkUrl || '');
+        setEditDownloadLink(s.updateUrl || s.downloadLink || s.apkUrl || '');
         setEditFreeLink(s.freeLink || '');
         setEditMaintenanceReason(s.maintenanceReason || 'Panel Is Ready to use');
         setEditShowHomeDownloadBtn(Boolean(s.showHomeDownloadBtn));
@@ -220,6 +300,15 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
         setGlobalFreePassword(s.freePassword || '');
         setGlobalMaxFreeSlots(s.maxFreeSlots ?? 50);
         setGlobalFreeValidDays(s.freeValidDays ?? 1);
+      } else if (settingsRes.error) {
+        setSettingsLoadStatus('error');
+        setSettingsLoadError({
+          method: settingsRes.method || 'GET',
+          url: settingsRes.url || 'https://dscauth.onrender.com/api/admin/settings/all',
+          status: settingsRes.status,
+          message: settingsRes.error,
+        });
+        setErrorMessage(settingsRes.error);
       }
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to load master owner database');
@@ -229,8 +318,44 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
   };
 
   useEffect(() => {
-    loadAll();
+    let isMounted = true;
+    const verifyAndLoad = async () => {
+      setLoading(true);
+      setErrorMessage(null);
+      // Section 6: Before displaying Owner-only controls, use GET /api/admin/owner/probe
+      const probeRes = await checkOwnerAccess(session.token);
+      if (!isMounted) return;
+
+      if (!probeRes.authorized) {
+        setOwnerAccess('denied');
+        setProbeError(
+          probeRes.error ||
+            '403: Admin/Owner permission denied. Owner privileges required on DSCAuth backend.'
+        );
+        setLoading(false);
+        return;
+      }
+
+      setOwnerAccess('authorized');
+      await loadAll();
+    };
+
+    verifyAndLoad();
+    return () => {
+      isMounted = false;
+    };
   }, [session.token]);
+
+  // Always re-fetch live settings directly from GET /api/admin/settings/all when opening Global UserPass or Settings
+  useEffect(() => {
+    if (
+      (activeSection === 'global_userpass' || activeSection === 'settings') &&
+      ownerAccess === 'authorized' &&
+      session?.token
+    ) {
+      fetchSettingsDirectly();
+    }
+  }, [activeSection, ownerAccess, session.token]);
 
   const notify = (msg: string) => {
     setStatusMessage(msg);
@@ -343,19 +468,47 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
     }
   };
 
-  // 7. Toggle Global Maintenance Mode
+  // 7. Toggle Global Maintenance Mode (Section 2 Contract: POST /api/admin/maintenance/toggle)
   const handleToggleMaintenance = async () => {
-    const res = await ownerToggleMaintenance(session.token);
-    notify(res.message);
-    setSettings((prev) => (prev ? { ...prev, maintenance: res.maintenance } : prev));
+    setIsProcessingAction(true);
+    setErrorMessage(null);
+    const targetState = !(settings?.isMaintenanceMode ?? settings?.maintenance ?? false);
+    const res = await toggleMaintenance(session.token, targetState);
+    setIsProcessingAction(false);
+    if (!res.success) {
+      setErrorMessage(res.message);
+      notify(`Maintenance toggle failed: ${res.message}`);
+    } else {
+      notify(res.message);
+      setSettings((prev) =>
+        prev
+          ? {
+              ...prev,
+              isMaintenanceMode: res.isMaintenanceMode,
+              maintenance: res.isMaintenanceMode,
+            }
+          : prev
+      );
+      // Re-fetch to ensure exact server state from GET /api/admin/settings/all
+      const fresh = await getSystemSettings(session.token);
+      if (fresh.settings) {
+        setSettings(fresh.settings);
+      }
+    }
   };
 
-  // 8. Save System Settings
+  // 8. Save System Settings (Section 1 & 5 Contract: PUT /api/admin/settings/update with complete object)
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!settings) {
+      notify('Cannot update settings: Server record not loaded. Please retry GET /api/admin/settings/all.');
+      return;
+    }
     setIsSavingSettings(true);
+    setErrorMessage(null);
     const payload: Partial<SystemSettings> = {
       latestVersion: editLatestVersion.trim(),
+      updateUrl: editDownloadLink.trim(),
       downloadLink: editDownloadLink.trim(),
       apkUrl: editDownloadLink.trim(),
       freeLink: editFreeLink.trim(),
@@ -368,23 +521,144 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
       premiumLink: editPremiumLink.trim(),
       customisedLink: editCustomisedLink.trim(),
     };
-    const res = await ownerUpdateSettings(session.token, payload);
+    const res = await updateSystemSettings(session.token, payload, settings);
     setIsSavingSettings(false);
-    notify(res.message);
+    if (!res.success) {
+      setErrorMessage(res.message);
+      notify(`Save failed: ${res.message}`);
+    } else {
+      notify(res.message);
+      if (res.settings) {
+        setSettings(res.settings);
+        setEditLatestVersion(res.settings.latestVersion || '3.5');
+        setEditDownloadLink(res.settings.updateUrl || res.settings.downloadLink || '');
+        setEditFreeLink(res.settings.freeLink || '');
+        setEditMaintenanceReason(res.settings.maintenanceReason || 'Panel Is Ready to use');
+        setEditShowHomeDownloadBtn(Boolean(res.settings.showHomeDownloadBtn));
+        setEditStreamerLink(res.settings.streamerLink || '');
+        setEditSniperLink(res.settings.sniperLink || '');
+        setEditSpecialLink(res.settings.specialLink || '');
+        setEditAimbotLink(res.settings.aimbotLink || '');
+        setEditPremiumLink(res.settings.premiumLink || '');
+        setEditCustomisedLink(res.settings.customisedLink || '');
+      }
+      await fetchSettingsDirectly();
+    }
   };
 
-  // 9. Save Global UserPass
-  const handleSaveGlobalUserPass = async () => {
+  // Free User Classification Helper (Section 6 & 7)
+  const isFreeAccount = (u: AdminUser) => {
+    const p = (u.plan || '').trim().toLowerCase();
+    return p === 'free' || p === 'free-panel' || p === 'free_panel' || p === 'freepanel' || p.includes('free');
+  };
+
+  // 9. Check & Open Global UserPass Confirmation (Section 6 & 7 Contract)
+  const handleOpenGlobalPassConfirm = async () => {
+    if (!settings) {
+      notify('Cannot update Global UserPass: Server settings record not loaded. Please wait for GET request to complete.');
+      return;
+    }
+    const trimmedUser = globalFreeUsername.trim();
+    if (!trimmedUser) {
+      // Blank means turning off public global login
+      setGlobalPassConfirmDetails({
+        isClearing: true,
+        user: null,
+      });
+      setShowGlobalPassConfirm(true);
+      return;
+    }
+
+    // Query Users database (GET /api/admin/users)
     setIsSavingGlobalPass(true);
-    const res = await ownerSetGlobalUserPass(session.token, {
-      freeUsername: globalFreeUsername.trim(),
-      freePassword: globalFreePassword.trim(),
-      maxFreeSlots: Number(globalMaxFreeSlots) || 50,
-      freeValidDays: Number(globalFreeValidDays) || 1,
+    const usersRes = await ownerGetUsers(session.token);
+    setIsSavingGlobalPass(false);
+    const latestUsers = usersRes.users && usersRes.users.length > 0 ? usersRes.users : users;
+    const target = trimmedUser.toLowerCase();
+    const matched = latestUsers.find((u) => (u.username || '').trim().toLowerCase() === target);
+
+    // CASE A: Requested username does NOT exist in backend
+    if (!matched) {
+      const msg = `Free user "${trimmedUser}" does not exist. Create/select an existing Free user first.`;
+      setErrorMessage(msg);
+      notify(msg);
+      return;
+    }
+
+    // CASE C: Requested username exists BUT it is a normal paid/User/Admin account
+    if (!isFreeAccount(matched)) {
+      const planName = matched.plan || 'Standard / Paid';
+      const msg = `This username ("${matched.username}") already belongs to another account (Plan: ${planName}). Choose an existing Free user.`;
+      setErrorMessage(msg);
+      notify(msg);
+      return;
+    }
+
+    // CASE B: Requested username exists AND it is already a Free user
+    setErrorMessage(null);
+    setGlobalPassConfirmDetails({
+      isClearing: false,
+      user: matched,
     });
+    setShowGlobalPassConfirm(true);
+  };
+
+  // Execute Global UserPass Save
+  const handleSaveGlobalUserPass = async () => {
+    if (!settings) {
+      notify('Cannot update Global UserPass: Server record not loaded. Please wait for GET request to succeed.');
+      return;
+    }
+    setIsSavingGlobalPass(true);
+    setErrorMessage(null);
+    const targetUsername = globalPassConfirmDetails?.isClearing
+      ? ''
+      : (globalPassConfirmDetails?.user?.username || globalFreeUsername.trim());
+
+    const res = await ownerSetGlobalUserPass(
+      session.token,
+      {
+        freeUsername: targetUsername,
+        freePassword: globalFreePassword.trim(),
+        maxFreeSlots: Number(globalMaxFreeSlots) || 50,
+        freeValidDays: Number(globalFreeValidDays) || 1,
+      },
+      settings
+    );
     setIsSavingGlobalPass(false);
     setShowGlobalPassConfirm(false);
-    notify(res.message);
+    if (!res.success) {
+      setErrorMessage(res.message);
+      notify(`Failed to update Global UserPass: ${res.message}`);
+    } else {
+      notify(res.message);
+      if (res.settings) {
+        setSettings(res.settings);
+        setGlobalFreeUsername(res.settings.freeUsername || '');
+        setGlobalFreePassword(res.settings.freePassword || '');
+        setGlobalMaxFreeSlots(res.settings.maxFreeSlots ?? 50);
+        setGlobalFreeValidDays(res.settings.freeValidDays ?? 1);
+      }
+      await fetchSettingsDirectly();
+    }
+  };
+
+  // Free User Edit Handler (PUT /api/admin/manage/free-user/update)
+  const handleSaveFreeUserEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFreeUser) return;
+    setIsSavingFreeUser(true);
+    const res = await ownerUpdateFreeUser(session.token, editingFreeUser);
+    setIsSavingFreeUser(false);
+    if (res.success) {
+      notify(res.message);
+      setFreeUsers((prev) =>
+        prev.map((f) => (f.id === editingFreeUser.id ? editingFreeUser : f))
+      );
+      setEditingFreeUser(null);
+    } else {
+      notify(`Update failed: ${res.message}`);
+    }
   };
 
   // 10. Save Live Panel Status
@@ -433,7 +707,68 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
     return o.status === orderFilter;
   });
 
-  const isMaintenanceActive = Boolean(settings?.maintenance);
+  const isMaintenanceActive = Boolean(settings?.isMaintenanceMode ?? settings?.maintenance);
+
+  if (ownerAccess === 'checking') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-3 p-8 text-center">
+        <RefreshCw className="w-8 h-8 text-amber-400 animate-spin" />
+        <h3 className="text-sm font-bold text-white">Verifying Owner Authorization...</h3>
+        <p className="text-xs text-slate-400 max-w-sm">
+          Probing DSCAuth backend (<code className="text-cyan-400">/api/admin/owner/probe</code>) to authenticate Owner privileges.
+        </p>
+      </div>
+    );
+  }
+
+  if (ownerAccess === 'denied') {
+    return (
+      <div className="flex flex-col gap-4 pb-20 max-w-2xl mx-auto w-full pt-8 animate-fadeIn">
+        <div className="p-8 rounded-2xl bg-[#121623] border border-red-500/40 text-center flex flex-col items-center gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
+            <Lock className="w-8 h-8" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">Owner Authorization Denied (403 Forbidden)</h3>
+            <p className="text-xs text-slate-400 mt-2 max-w-md mx-auto">
+              The DSCAuth backend probe (<code className="text-red-300">GET /api/admin/owner/probe</code>) returned HTTP 403 Forbidden. This account does not possess Owner privileges.
+            </p>
+            {probeError && (
+              <div className="mt-3 p-3 rounded-lg bg-red-950/40 border border-red-500/30 text-[11px] font-mono text-red-300 text-left">
+                {probeError}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              onClick={() => onNavigate('admin_dashboard')}
+              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold transition-colors flex items-center gap-2"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Return to Admin Dashboard</span>
+            </button>
+            <button
+              onClick={async () => {
+                setOwnerAccess('checking');
+                const probeRes = await checkOwnerAccess(session.token);
+                if (probeRes.authorized) {
+                  setOwnerAccess('authorized');
+                  await loadAll();
+                } else {
+                  setOwnerAccess('denied');
+                  setProbeError(probeRes.error || '403: Admin/Owner permission denied.');
+                }
+              }}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 text-white text-xs font-semibold hover:brightness-110 transition-all flex items-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Retry Probe</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4 pb-20 max-w-5xl mx-auto w-full">
@@ -808,6 +1143,64 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
       {/* ========================================================================= */}
       {activeSection === 'settings' && (
         <form onSubmit={handleSaveSettings} className="flex flex-col gap-4 animate-fadeIn">
+          {/* Settings Load Diagnostic State */}
+          {settingsLoadStatus === 'loading' && (
+            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700/60 flex items-center gap-3 text-xs text-slate-300">
+              <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
+              <span>Fetching system configuration from <code className="text-cyan-300 font-mono">GET https://dscauth.onrender.com/api/admin/settings/all</code>...</span>
+            </div>
+          )}
+
+          {settingsLoadStatus === 'error' && settingsLoadError && (
+            <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/50 flex flex-col gap-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-red-300">
+                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                  <span>DSCAuth Settings API Error (GET /api/admin/settings/all)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchSettingsDirectly}
+                  className="px-3 py-1 rounded-lg bg-red-800/60 hover:bg-red-700/60 text-white font-medium flex items-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry Request</span>
+                </button>
+              </div>
+              <div className="p-2.5 rounded-lg bg-black/40 border border-red-500/30 font-mono text-[11px] text-red-200 space-y-1">
+                <div><strong>METHOD:</strong> {settingsLoadError.method}</div>
+                <div><strong>URL:</strong> {settingsLoadError.url}</div>
+                <div><strong>STATUS:</strong> {settingsLoadError.status}</div>
+                <div className="break-all"><strong>ERROR:</strong> {settingsLoadError.message}</div>
+              </div>
+              <p className="text-[11px] text-red-300/90">
+                {settingsLoadError.status === 401
+                  ? 'Authentication failed (401 Unauthorized). The current session token is invalid or expired. Please sign out and log in again via Administrator Gateway.'
+                  : settingsLoadError.status === 403
+                  ? 'Permission denied (403 Forbidden). Your account does not have Owner privileges on the DSCAuth backend.'
+                  : 'Backend communication error. Configuration editing is locked until server settings are loaded to prevent corrupting database keys.'}
+              </p>
+            </div>
+          )}
+
+          {settingsLoadStatus === 'success' && (
+            <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Synchronized with DSCAuth (<code className="font-mono text-[11px] text-emerald-200">GET /api/admin/settings/all → 200 OK</code>)</span>
+              </div>
+              <button
+                type="button"
+                onClick={fetchSettingsDirectly}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 underline font-mono flex items-center gap-1"
+                title="Refresh settings directly from backend"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Refresh</span>
+              </button>
+            </div>
+          )}
+
           <div className="p-4 rounded-2xl bg-[#121623] border border-[#20273c] flex flex-col gap-4">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <Settings className="w-4 h-4 text-cyan-400" />
@@ -820,9 +1213,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editLatestVersion}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditLatestVersion(e.target.value)}
                   placeholder="e.g. 3.5"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-cyan-400 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-cyan-400 focus:outline-none disabled:opacity-50"
                 />
               </div>
 
@@ -831,9 +1225,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editMaintenanceReason}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditMaintenanceReason(e.target.value)}
                   placeholder="e.g. Panel Is Ready to use"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white focus:border-cyan-400 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white focus:border-cyan-400 focus:outline-none disabled:opacity-50"
                 />
               </div>
 
@@ -844,9 +1239,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editDownloadLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditDownloadLink(e.target.value)}
                   placeholder="https://..."
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono text-xs focus:border-cyan-400 focus:outline-none disabled:opacity-50"
                 />
               </div>
 
@@ -857,9 +1253,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editFreeLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditFreeLink(e.target.value)}
                   placeholder="https://t.me/..."
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono text-xs focus:border-cyan-400 focus:outline-none disabled:opacity-50"
                 />
               </div>
 
@@ -873,8 +1270,9 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 </div>
                 <button
                   type="button"
+                  disabled={settingsLoadStatus !== 'success'}
                   onClick={() => setEditShowHomeDownloadBtn(!editShowHomeDownloadBtn)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
                     editShowHomeDownloadBtn ? 'bg-cyan-500' : 'bg-slate-700'
                   }`}
                 >
@@ -900,9 +1298,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editStreamerLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditStreamerLink(e.target.value)}
                   placeholder="https://..."
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono"
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono disabled:opacity-50"
                 />
               </div>
               <div>
@@ -910,9 +1309,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editSniperLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditSniperLink(e.target.value)}
                   placeholder="https://..."
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono"
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono disabled:opacity-50"
                 />
               </div>
               <div>
@@ -920,9 +1320,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editAimbotLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditAimbotLink(e.target.value)}
                   placeholder="https://..."
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono"
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono disabled:opacity-50"
                 />
               </div>
               <div>
@@ -930,9 +1331,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editSpecialLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditSpecialLink(e.target.value)}
                   placeholder="https://..."
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono"
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono disabled:opacity-50"
                 />
               </div>
               <div>
@@ -940,9 +1342,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editPremiumLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditPremiumLink(e.target.value)}
                   placeholder="https://..."
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono"
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono disabled:opacity-50"
                 />
               </div>
               <div>
@@ -950,9 +1353,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={editCustomisedLink}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setEditCustomisedLink(e.target.value)}
                   placeholder="https://..."
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono"
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#0c101a] border border-slate-700 text-white text-xs font-mono disabled:opacity-50"
                 />
               </div>
             </div>
@@ -960,7 +1364,7 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
             <div className="pt-2 flex justify-end">
               <button
                 type="submit"
-                disabled={isSavingSettings}
+                disabled={isSavingSettings || settingsLoadStatus !== 'success'}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all flex items-center gap-2 shadow-lg shadow-cyan-500/20 disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
@@ -976,6 +1380,64 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
       {/* ========================================================================= */}
       {activeSection === 'global_userpass' && (
         <div className="flex flex-col gap-4 animate-fadeIn">
+          {/* Settings Load Diagnostic State */}
+          {settingsLoadStatus === 'loading' && (
+            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-700/60 flex items-center gap-3 text-xs text-slate-300">
+              <RefreshCw className="w-4 h-4 text-amber-400 animate-spin" />
+              <span>Fetching Global UserPass credentials from <code className="text-cyan-300 font-mono">GET https://dscauth.onrender.com/api/admin/settings/all</code>...</span>
+            </div>
+          )}
+
+          {settingsLoadStatus === 'error' && settingsLoadError && (
+            <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/50 flex flex-col gap-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-red-300">
+                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                  <span>DSCAuth Settings API Error (GET /api/admin/settings/all)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchSettingsDirectly}
+                  className="px-3 py-1 rounded-lg bg-red-800/60 hover:bg-red-700/60 text-white font-medium flex items-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry Request</span>
+                </button>
+              </div>
+              <div className="p-2.5 rounded-lg bg-black/40 border border-red-500/30 font-mono text-[11px] text-red-200 space-y-1">
+                <div><strong>METHOD:</strong> {settingsLoadError.method}</div>
+                <div><strong>URL:</strong> {settingsLoadError.url}</div>
+                <div><strong>STATUS:</strong> {settingsLoadError.status}</div>
+                <div className="break-all"><strong>ERROR:</strong> {settingsLoadError.message}</div>
+              </div>
+              <p className="text-[11px] text-red-300/90">
+                {settingsLoadError.status === 401
+                  ? 'Authentication failed (401 Unauthorized). The current session token is invalid or expired. Please sign out and log in again via Administrator Gateway.'
+                  : settingsLoadError.status === 403
+                  ? 'Permission denied (403 Forbidden). Your account does not have Owner privileges on the DSCAuth backend.'
+                  : 'Backend communication error. Global UserPass editing is locked until server settings are loaded to prevent corrupting database keys.'}
+              </p>
+            </div>
+          )}
+
+          {settingsLoadStatus === 'success' && (
+            <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Synchronized with DSCAuth (<code className="font-mono text-[11px] text-emerald-200">GET /api/admin/settings/all → 200 OK</code>)</span>
+              </div>
+              <button
+                type="button"
+                onClick={fetchSettingsDirectly}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 underline font-mono flex items-center gap-1"
+                title="Refresh settings directly from backend"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Refresh</span>
+              </button>
+            </div>
+          )}
+
           <div className="p-5 rounded-2xl bg-[#121623] border border-amber-500/40 flex flex-col gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300">
@@ -991,16 +1453,58 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="text-[11px] text-slate-400 block mb-1">
-                  Global Free Username <span className="text-amber-400">(Blank = Turn OFF)</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] text-slate-400">
+                    Global Free Username <span className="text-amber-400">(Blank = Turn OFF)</span>
+                  </label>
+                  {(() => {
+                    const trimmed = globalFreeUsername.trim();
+                    if (!trimmed) {
+                      return <span className="text-[10px] text-slate-400 font-mono">● OFF / Blank</span>;
+                    }
+                    const matched = users.find((u) => (u.username || '').trim().toLowerCase() === trimmed.toLowerCase());
+                    if (!matched) {
+                      return <span className="text-[10px] text-amber-400 font-mono">● User Not in DB</span>;
+                    }
+                    if (isFreeAccount(matched)) {
+                      return <span className="text-[10px] text-emerald-400 font-bold font-mono">✓ Free Account</span>;
+                    }
+                    return <span className="text-[10px] text-red-400 font-bold font-mono">⚠ Paid/Other Account</span>;
+                  })()}
+                </div>
                 <input
                   type="text"
                   value={globalFreeUsername}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setGlobalFreeUsername(e.target.value)}
                   placeholder="Leave empty to disable, or enter username..."
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none disabled:opacity-50"
                 />
+
+                {/* Detected Free Accounts Selector */}
+                {users.filter(isFreeAccount).length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                    <span className="text-[10px] text-slate-400">Select Existing Free Account:</span>
+                    {users.filter(isFreeAccount).map((fu) => (
+                      <button
+                        key={fu.id}
+                        type="button"
+                        onClick={() => setGlobalFreeUsername(fu.username)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                          globalFreeUsername.trim().toLowerCase() === fu.username.toLowerCase()
+                            ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                            : 'bg-[#182033] hover:bg-[#222d48] text-cyan-300 border border-cyan-500/30'
+                        }`}
+                      >
+                        {fu.username}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    No accounts with Plan "free" detected in Users table yet.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1008,9 +1512,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="text"
                   value={globalFreePassword}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setGlobalFreePassword(e.target.value)}
-                  placeholder="e.g. DSC_FreePass_2026"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none"
+                  placeholder="Enter free password..."
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none disabled:opacity-50"
                 />
               </div>
 
@@ -1019,9 +1524,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="number"
                   value={globalMaxFreeSlots}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setGlobalMaxFreeSlots(e.target.value)}
                   placeholder="50"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none disabled:opacity-50"
                 />
               </div>
 
@@ -1030,9 +1536,10 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 <input
                   type="number"
                   value={globalFreeValidDays}
+                  disabled={settingsLoadStatus !== 'success'}
                   onChange={(e) => setGlobalFreeValidDays(e.target.value)}
                   placeholder="1"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-amber-400 focus:outline-none disabled:opacity-50"
                 />
               </div>
             </div>
@@ -1047,10 +1554,11 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
 
               <button
                 type="button"
-                onClick={() => setShowGlobalPassConfirm(true)}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-amber-500/20"
+                disabled={settingsLoadStatus !== 'success' || isSavingGlobalPass}
+                onClick={handleOpenGlobalPassConfirm}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-amber-500/20 disabled:opacity-50"
               >
-                Apply Global UserPass
+                {isSavingGlobalPass ? 'Verifying...' : 'Apply Global UserPass'}
               </button>
             </div>
           </div>
@@ -1127,6 +1635,13 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setEditingFreeUser(f)}
+                            className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20"
+                            title="Edit Free User Record (PUT /api/admin/manage/free-user/update)"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => handleToggleFreeUserBan(f)}
                             className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20"
@@ -1632,17 +2147,50 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
           <div className="w-full max-w-sm rounded-2xl bg-[#121623] border border-amber-500/50 p-5 shadow-2xl text-slate-100 flex flex-col gap-3">
             <div className="flex items-center gap-2.5 text-amber-400">
               <AlertTriangle className="w-5 h-5 shrink-0" />
-              <h3 className="text-sm font-bold text-white">Update Global Free Access?</h3>
+              <h3 className="text-sm font-bold text-white">
+                {globalPassConfirmDetails?.isClearing
+                  ? 'Disable Global Free Access?'
+                  : 'Confirm Global Free Access Update'}
+              </h3>
             </div>
             <p className="text-xs text-slate-300">
-              You are updating the global public credentials for the Free Panel:
+              {globalPassConfirmDetails?.isClearing ? (
+                <span>
+                  You are setting the Global Free Username to <strong className="text-amber-300">blank</strong>. This will turn OFF public global logins. Existing users can still download.
+                </span>
+              ) : (
+                <span>
+                  Updating Global UserPass settings with verified Free account{' '}
+                  <strong className="text-emerald-300">
+                    {globalPassConfirmDetails?.user?.username || globalFreeUsername.trim()}
+                  </strong>
+                  .
+                </span>
+              )}
             </p>
+
             <div className="text-xs font-mono bg-[#0c101a] p-3 rounded-xl border border-slate-800 flex flex-col gap-1 text-slate-300">
-              <div>Username: <strong className="text-amber-300">{globalFreeUsername || '(OFF / BLANK)'}</strong></div>
+              <div>
+                Username:{' '}
+                <strong className={globalPassConfirmDetails?.isClearing ? 'text-amber-400' : 'text-emerald-400'}>
+                  {globalPassConfirmDetails?.isClearing
+                    ? '(OFF / BLANK)'
+                    : globalPassConfirmDetails?.user?.username || globalFreeUsername.trim()}
+                </strong>
+              </div>
+              <div>
+                Account Status:{' '}
+                <strong className="text-cyan-300">
+                  {globalPassConfirmDetails?.isClearing
+                    ? 'Inactive'
+                    : `Verified Free User (Plan: ${globalPassConfirmDetails?.user?.plan || 'free'})`}
+                </strong>
+              </div>
               <div>Password: <strong className="text-white">{globalFreePassword || '(None)'}</strong></div>
               <div>Max Slots: <strong className="text-cyan-300">{globalMaxFreeSlots}</strong></div>
               <div>Valid Days: <strong className="text-cyan-300">{globalFreeValidDays}</strong></div>
             </div>
+
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
@@ -1658,10 +2206,118 @@ export const OwnerCenterScreen: React.FC<Props> = ({ session, onNavigate }) => {
                 disabled={isSavingGlobalPass}
                 className="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs disabled:opacity-50"
               >
-                {isSavingGlobalPass ? 'Updating...' : 'Confirm Update'}
+                {isSavingGlobalPass ? 'Saving...' : 'Confirm Update'}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* FREE USER EDIT MODAL (Section 13: PUT /api/admin/manage/free-user/update) */}
+      {editingFreeUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <form
+            onSubmit={handleSaveFreeUserEdit}
+            className="w-full max-w-md rounded-2xl bg-[#121623] border border-cyan-500/40 p-5 shadow-2xl text-slate-100 flex flex-col gap-4"
+          >
+            <div className="flex items-center justify-between border-b border-[#21283d] pb-3">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-cyan-400" />
+                <h3 className="text-sm font-bold text-white">Edit Free User Record</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingFreeUser(null)}
+                className="p-1 rounded text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 text-xs">
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Username</label>
+                <input
+                  type="text"
+                  value={editingFreeUser.username}
+                  onChange={(e) =>
+                    setEditingFreeUser({ ...editingFreeUser, username: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-cyan-400 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Hardware ID (HWID)</label>
+                <input
+                  type="text"
+                  value={editingFreeUser.hwid}
+                  onChange={(e) =>
+                    setEditingFreeUser({ ...editingFreeUser, hwid: e.target.value })
+                  }
+                  placeholder="HWID string or Unbound"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">Failed Login Attempts</label>
+                  <input
+                    type="number"
+                    value={editingFreeUser.failedLoginAttempts}
+                    onChange={(e) =>
+                      setEditingFreeUser({
+                        ...editingFreeUser,
+                        failedLoginAttempts: Number(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white font-mono focus:border-cyan-400 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">Access Status</label>
+                  <select
+                    value={editingFreeUser.isBanned ? 'banned' : 'allowed'}
+                    onChange={(e) =>
+                      setEditingFreeUser({
+                        ...editingFreeUser,
+                        isBanned: e.target.value === 'banned',
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-[#0c101a] border border-slate-700 text-white focus:border-cyan-400 focus:outline-none"
+                  >
+                    <option value="allowed">Allowed (Active)</option>
+                    <option value="banned">Banned (Suspended)</option>
+                  </select>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-400 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                Note: Updating this individual Free User record executes <code className="text-cyan-300 font-mono">PUT /api/admin/manage/free-user/update</code> without altering SystemSettings or other accounts.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-[#21283d]">
+              <button
+                type="button"
+                onClick={() => setEditingFreeUser(null)}
+                disabled={isSavingFreeUser}
+                className="flex-1 py-2 rounded-xl bg-[#1e2538] text-xs font-semibold text-slate-300 hover:bg-[#28324a]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSavingFreeUser}
+                className="flex-1 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs disabled:opacity-50"
+              >
+                {isSavingFreeUser ? 'Saving...' : 'Save Free User'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

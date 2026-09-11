@@ -14,6 +14,7 @@ import {
   StopCircle,
   Terminal,
   Loader2,
+  Radio,
 } from 'lucide-react';
 import { ScreenDestination, UserSession, UserOrder } from '../types';
 import {
@@ -31,6 +32,12 @@ import {
   setVoiceOutputEnabled,
   AssistantVoiceState,
 } from '../services/speechService';
+import {
+  WakeWordState,
+  WakeWordEvent,
+  extractWakeWordAndCommand,
+} from '../services/wakeWordService';
+import { MJWakeStatusIndicator } from './MJWakeStatusIndicator';
 import { getScreenSemantic } from '../services/screenRegistry';
 import { validateActionPermission, ACTION_DEFINITIONS } from '../services/actionRegistry';
 import { fetchUserOrder, getAppConfig } from '../services/api';
@@ -46,6 +53,11 @@ interface Props {
     actionCode: string,
     payload?: unknown
   ) => Promise<{ success: boolean; message?: string }> | void;
+  wakeWordEnabled?: boolean;
+  wakeWordState?: WakeWordState;
+  onToggleWakeWord?: () => void;
+  pendingWakeEvent?: WakeWordEvent | null;
+  onClearPendingWakeEvent?: () => void;
 }
 
 export const AIAssistantSheet: React.FC<Props> = ({
@@ -56,6 +68,11 @@ export const AIAssistantSheet: React.FC<Props> = ({
   onNavigate,
   onBack,
   onActionExecute,
+  wakeWordEnabled = false,
+  wakeWordState = 'disabled',
+  onToggleWakeWord,
+  pendingWakeEvent,
+  onClearPendingWakeEvent,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -117,7 +134,30 @@ export const AIAssistantSheet: React.FC<Props> = ({
     }
   };
 
+  // Handle external wake-word trigger ("Hey MJ" / "MJ")
+  useEffect(() => {
+    if (isOpen && pendingWakeEvent) {
+      const { command } = pendingWakeEvent;
+      if (onClearPendingWakeEvent) {
+        onClearPendingWakeEvent();
+      }
+
+      if (command && command.trim()) {
+        // User spoke the command directly with the wake phrase
+        handleSendQuery(command.trim());
+      } else {
+        // User just said "Hey MJ" or "MJ" - start active voice listening for command
+        setTimeout(() => {
+          handleMicClick();
+        }, 80);
+      }
+    }
+  }, [isOpen, pendingWakeEvent]);
+
   const handleMicClick = () => {
+    // Stop any active speech synthesis immediately (user interruption)
+    stopSpeaking();
+
     if (voiceState === 'listening') {
       stopVoiceListening();
       setVoiceState('idle');
@@ -125,13 +165,16 @@ export const AIAssistantSheet: React.FC<Props> = ({
     }
 
     setErrorMessage(null);
-    stopSpeaking();
 
     const stop = startVoiceListening(
       (transcript, isFinal) => {
-        setInputText(transcript);
-        if (isFinal && transcript.trim()) {
-          handleSendQuery(transcript.trim());
+        // Normalize and strip wake phrase if user said "Hey MJ" while speaking
+        const detection = extractWakeWordAndCommand(transcript);
+        const actualQuery = detection.detected && detection.command ? detection.command : transcript;
+
+        setInputText(actualQuery);
+        if (isFinal && actualQuery.trim()) {
+          handleSendQuery(actualQuery.trim());
           stopVoiceListening();
         }
       },
@@ -452,6 +495,48 @@ export const AIAssistantSheet: React.FC<Props> = ({
           <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 shrink-0">
             {currentSemantic.availableActions.length} Actions
           </span>
+        </div>
+
+        {/* Wake Word Setting Bar */}
+        <div className="px-3.5 py-2 bg-[#121726] border-b border-[#1f273d] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+              wakeWordEnabled ? 'bg-cyan-500/20 text-cyan-300' : 'bg-slate-800 text-slate-400'
+            }`}>
+              <Radio className={`w-3.5 h-3.5 ${wakeWordEnabled ? 'animate-pulse' : ''}`} />
+            </div>
+            <div className="min-w-0 flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-white truncate">Wake word</span>
+                <MJWakeStatusIndicator
+                  state={wakeWordState}
+                  enabled={wakeWordEnabled}
+                  compact
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 truncate">
+                Say 'Hey MJ' or 'MJ' to start talking to MJ.
+              </p>
+            </div>
+          </div>
+
+          {/* Toggle Switch [ ON / OFF ] */}
+          {onToggleWakeWord && (
+            <button
+              onClick={onToggleWakeWord}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                wakeWordEnabled ? 'bg-cyan-500' : 'bg-slate-800'
+              }`}
+              title={`Turn Wake Word ${wakeWordEnabled ? 'OFF' : 'ON'}`}
+            >
+              <span className="sr-only">Toggle wake word</span>
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  wakeWordEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          )}
         </div>
 
         {/* Chat History Stream */}

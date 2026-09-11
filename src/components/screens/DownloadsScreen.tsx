@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, FileCode, Smartphone, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Archive, Loader2 } from 'lucide-react';
 import { DownloadItem, SystemSettings } from '../../types';
-import { getAppConfig, subscribeAppConfig } from '../../services/api';
+import { getAppConfig, subscribeAppConfig, fetchSystemStatus } from '../../services/api';
 import { createAndroidProjectZip } from '../../services/androidProjectGenerator';
 
 export const DownloadsScreen: React.FC = () => {
@@ -12,6 +12,7 @@ export const DownloadsScreen: React.FC = () => {
   const [isGeneratingZip, setIsGeneratingZip] = useState(false);
 
   useEffect(() => {
+    fetchSystemStatus().catch(() => {});
     const unsubscribe = subscribeAppConfig((newCfg) => {
       setConfig(newCfg);
     });
@@ -39,15 +40,15 @@ export const DownloadsScreen: React.FC = () => {
       id: 'dsc-android-client',
       title: 'DSCWeb Android Native Client',
       category: 'Android',
-      version: 'v1.0.0 (Release Build)',
+      version: `v${config.latestVersion || '3.5'}`,
       size: '28.4 MB',
-      date: '2026-09-10',
-      downloadUrl: config.downloadLink || config.apkUrl || '',
+      date: '2026-09-11',
+      downloadUrl: config.updateUrl || config.downloadLink || config.apkUrl || '',
       changelog: [
-        'Initial official Android native Jetpack Compose release',
         'Direct DSCAuth integration with hardware Keystore token store',
         'User, Admin, and Owner centers with real-time sync',
         'Dark-first high-contrast Material 3 interface',
+        'Automated update detection via updateUrl system settings',
       ],
     },
     {
@@ -62,6 +63,84 @@ export const DownloadsScreen: React.FC = () => {
         'Live slot availability detector',
         'Automatic credentials autofill',
         'Low battery consumption background sync',
+      ],
+    },
+    {
+      id: 'dsc-streamer-mod',
+      title: 'DSC Streamer Mod Package',
+      category: 'Android',
+      version: 'v3.2',
+      size: '18.6 MB',
+      date: '2026-09-05',
+      downloadUrl: config.streamerLink || '',
+      changelog: [
+        'Streamer overlay cloaking mode',
+        'Direct video capture filter',
+      ],
+    },
+    {
+      id: 'dsc-sniper-mod',
+      title: 'DSC Sniper Scope Enhancement',
+      category: 'Android',
+      version: 'v2.8',
+      size: '16.1 MB',
+      date: '2026-09-04',
+      downloadUrl: config.sniperLink || '',
+      changelog: [
+        'High refresh rate reticle zoom',
+        'Ballistic physics stabilization',
+      ],
+    },
+    {
+      id: 'dsc-aimbot-mod',
+      title: 'DSC Aimbot Calibration Suite',
+      category: 'Android',
+      version: 'v4.0',
+      size: '21.5 MB',
+      date: '2026-09-02',
+      downloadUrl: config.aimbotLink || '',
+      changelog: [
+        'Smooth aim curve assist',
+        'Prediction trajectory calculator',
+      ],
+    },
+    {
+      id: 'dsc-special-mod',
+      title: 'DSC Special Edition Package',
+      category: 'Android',
+      version: 'v1.9',
+      size: '24.0 MB',
+      date: '2026-09-01',
+      downloadUrl: config.specialLink || '',
+      changelog: [
+        'Exclusive VIP security unlocks',
+        'Encrypted network tunnel',
+      ],
+    },
+    {
+      id: 'dsc-premium-mod',
+      title: 'DSC Premium VIP Build',
+      category: 'Android',
+      version: 'v5.0 Pro',
+      size: '31.2 MB',
+      date: '2026-08-30',
+      downloadUrl: config.premiumLink || '',
+      changelog: [
+        'All VIP features unlocked',
+        'Zero crash kernel bypass engine',
+      ],
+    },
+    {
+      id: 'dsc-customised-mod',
+      title: 'DSC Customised Client Build',
+      category: 'Android',
+      version: 'v3.5 Custom',
+      size: '22.8 MB',
+      date: '2026-08-28',
+      downloadUrl: config.customisedLink || '',
+      changelog: [
+        'Custom configuration bundle',
+        'User-specific module presets',
       ],
     },
     {
@@ -109,7 +188,7 @@ export const DownloadsScreen: React.FC = () => {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
       } catch (err) {
-        console.error('Failed to generate project ZIP:', err);
+        console.warn('Failed to generate project ZIP:', err);
         setNotice('Failed to generate Android project archive.');
       } finally {
         setIsGeneratingZip(false);

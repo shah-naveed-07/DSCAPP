@@ -111,14 +111,29 @@ export function getAppConfig(): SystemSettings {
     // fallback clean configuration
   }
   return {
+    id: 1,
+    isMaintenanceMode: false,
+    maintenanceReason: 'Panel Is Ready to use',
+    maxFreeSlots: 50,
+    latestVersion: '3.5',
+    updateUrl: '',
+    showHomeDownloadBtn: false,
+    freeValidDays: 1,
+    freeUsername: '',
+    freePassword: '',
+    freeLink: '',
+    streamerLink: '',
+    sniperLink: '',
+    specialLink: '',
+    aimbotLink: '',
+    premiumLink: '',
+    customisedLink: '',
+    maintenance: false,
+    downloadLink: '',
+    apkUrl: '',
     registrationOpen: true,
     freePanelActive: true,
     defaultDurationDays: 30,
-    showHomeDownloadBtn: false,
-    freeLink: '',
-    downloadLink: '',
-    apkUrl: '',
-    maintenance: false,
     announcement: 'DSC Official Native Android Client connected.',
     supportDiscord: 'https://discord.gg/darkskull',
     supportTelegram: 'https://t.me/dscofficial',
@@ -127,7 +142,17 @@ export function getAppConfig(): SystemSettings {
 
 export function saveAppConfig(newCfg: Partial<SystemSettings>): SystemSettings {
   const current = getAppConfig();
-  const merged: SystemSettings = { ...current, ...newCfg };
+  const merged: SystemSettings = {
+    ...current,
+    ...newCfg,
+    // Keep sync between isMaintenanceMode and maintenance
+    isMaintenanceMode: newCfg.isMaintenanceMode !== undefined ? newCfg.isMaintenanceMode : newCfg.maintenance !== undefined ? newCfg.maintenance : current.isMaintenanceMode,
+    maintenance: newCfg.isMaintenanceMode !== undefined ? newCfg.isMaintenanceMode : newCfg.maintenance !== undefined ? newCfg.maintenance : current.maintenance,
+    // Keep sync between updateUrl and downloadLink / apkUrl
+    updateUrl: newCfg.updateUrl || newCfg.downloadLink || newCfg.apkUrl || current.updateUrl,
+    downloadLink: newCfg.updateUrl || newCfg.downloadLink || newCfg.apkUrl || current.downloadLink,
+    apkUrl: newCfg.updateUrl || newCfg.downloadLink || newCfg.apkUrl || current.apkUrl,
+  };
   try {
     localStorage.setItem(APP_CONFIG_STORAGE_KEY, JSON.stringify(merged));
   } catch {
@@ -142,6 +167,91 @@ export function subscribeAppConfig(listener: ConfigListener): () => void {
   listener(getAppConfig());
   return () => {
     configListeners.delete(listener);
+  };
+}
+
+// Data Sanitization helper for network logging (never logs JWT tokens, passwords, or credentials)
+export function sanitizeForLogging(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'string') {
+    if (obj.startsWith('eyJ') || obj.startsWith('Bearer eyJ')) {
+      return '[REDACTED_JWT]';
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeForLogging(item));
+  }
+  if (typeof obj === 'object') {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      if (/password|token|jwt|secret|auth|credential|key|freepassword/i.test(key)) {
+        sanitized[key] = '[REDACTED]';
+      } else {
+        sanitized[key] = sanitizeForLogging(value);
+      }
+    }
+    return sanitized;
+  }
+  return obj;
+}
+
+// Mapper supporting exact DSCAuth database contract and PascalCase variants
+export function mapBackendSettings(raw: any): SystemSettings {
+  if (!raw || typeof raw !== 'object') {
+    return getAppConfig();
+  }
+
+  const source = Array.isArray(raw) ? (raw[0] || {}) : (raw.data || raw.settings || raw);
+
+  const id = source.id ?? source.Id ?? source._id ?? 1;
+  const isMaintenanceMode = Boolean(
+    source.isMaintenanceMode ?? source.IsMaintenanceMode ?? source.maintenance ?? false
+  );
+  const maintenanceReason = String(
+    source.maintenanceReason ?? source.MaintenanceReason ?? source.reason ?? 'Panel Is Ready to use'
+  );
+  const maxFreeSlots = source.maxFreeSlots ?? source.MaxFreeSlots ?? 50;
+  const latestVersion = String(source.latestVersion ?? source.LatestVersion ?? '3.5');
+  const updateUrl = String(
+    source.updateUrl ?? source.UpdateUrl ?? source.downloadLink ?? source.apkUrl ?? ''
+  );
+  const showHomeDownloadBtn = Boolean(
+    source.showHomeDownloadBtn ?? source.ShowHomeDownloadBtn ?? false
+  );
+  const freeValidDays = source.freeValidDays ?? source.FreeValidDays ?? 1;
+  const freeUsername = String(source.freeUsername ?? source.FreeUsername ?? '');
+  const freePassword = String(source.freePassword ?? source.FreePassword ?? '');
+  const freeLink = String(source.freeLink ?? source.FreeLink ?? '');
+  const streamerLink = String(source.streamerLink ?? source.StreamerLink ?? '');
+  const sniperLink = String(source.sniperLink ?? source.SniperLink ?? '');
+  const specialLink = String(source.specialLink ?? source.SpecialLink ?? '');
+  const aimbotLink = String(source.aimbotLink ?? source.AimbotLink ?? '');
+  const premiumLink = String(source.premiumLink ?? source.PremiumLink ?? '');
+  const customisedLink = String(source.customisedLink ?? source.CustomisedLink ?? '');
+
+  return {
+    ...source,
+    id,
+    isMaintenanceMode,
+    maintenanceReason,
+    maxFreeSlots,
+    latestVersion,
+    updateUrl,
+    showHomeDownloadBtn,
+    freeValidDays,
+    freeUsername,
+    freePassword,
+    freeLink,
+    streamerLink,
+    sniperLink,
+    specialLink,
+    aimbotLink,
+    premiumLink,
+    customisedLink,
+    maintenance: isMaintenanceMode,
+    downloadLink: updateUrl,
+    apkUrl: updateUrl,
   };
 }
 
@@ -234,7 +344,36 @@ export function extractClaims(token: string): {
   return { username, role, isOwner, exp, sub };
 }
 
-// Unified fetch wrapper with logging and timeout
+// Host connectivity diagnostic per Section 14
+export async function testDSCAuthConnectivity(): Promise<{
+  reachable: boolean;
+  status?: number;
+  durationMs: number;
+  error?: string;
+}> {
+  const start = Date.now();
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/public/free-panel`, {
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-store',
+    });
+    return {
+      reachable: true,
+      status: res.status,
+      durationMs: Date.now() - start,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    return {
+      reachable: false,
+      durationMs: Date.now() - start,
+      error: msg,
+    };
+  }
+}
+
+// Unified fetch wrapper with strict direct DSCAuth communication, logging and diagnostics
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -246,13 +385,19 @@ async function request<T>(
   const logId = Math.random().toString(36).substring(2, 9);
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     Accept: 'application/json',
     ...(options.headers as Record<string, string>),
   };
 
+  if (options.body || method === 'POST' || method === 'PUT' || method === 'PATCH') {
+    headers['Content-Type'] = 'application/json';
+  }
+
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    const cleanToken = token.trim().replace(/[\r\n\t]/g, '');
+    if (cleanToken) {
+      headers['Authorization'] = `Bearer ${cleanToken}`;
+    }
   }
 
   let parsedReqBody: unknown = undefined;
@@ -270,13 +415,32 @@ async function request<T>(
   if (!isSimulated) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for Render free tier
+      const timeoutId = setTimeout(() => controller.abort(), 35000); // 35s timeout
 
-      const res = await fetch(url, {
+      // Strict requirement (Section 13):
+      // [DSCAuth API]
+      // METHOD: GET
+      // URL: https://dscauth.onrender.com/api/admin/settings/all
+      console.log(`[DSCAuth API]\nMETHOD: ${method}\nURL: ${url}`);
+
+      const fetchOptions: RequestInit = {
         ...options,
+        mode: 'cors',
         headers,
         signal: controller.signal,
-      });
+      };
+
+      let res: Response;
+      try {
+        res = await fetch(url, fetchOptions);
+      } catch (initialErr) {
+        if (initialErr instanceof Error && initialErr.name === 'AbortError') {
+          throw initialErr;
+        }
+        // Single quick retry after brief pause if network glitch or cold start
+        await new Promise((r) => setTimeout(r, 600));
+        res = await fetch(url, fetchOptions);
+      }
       clearTimeout(timeoutId);
 
       const durationMs = Date.now() - startTime;
@@ -288,6 +452,9 @@ async function request<T>(
         responseBody = text;
       }
 
+      const sanitizedReq = sanitizeForLogging(parsedReqBody);
+      const sanitizedRes = sanitizeForLogging(responseBody);
+
       recordLog({
         id: logId,
         timestamp: new Date().toLocaleTimeString(),
@@ -296,16 +463,57 @@ async function request<T>(
         status: res.status,
         statusText: res.statusText,
         durationMs,
-        requestBody: parsedReqBody,
-        responseBody,
+        requestBody: sanitizedReq,
+        responseBody: sanitizedRes,
       });
 
+      // Strict requirement (Section 13):
+      // Log status, response body (sanitized - never log JWT or passwords)
+      console.log(`[DSCAuth API]\nMETHOD: ${method}\nURL: ${url}\nSTATUS: ${res.status}\nRESPONSE BODY:`, sanitizedRes);
+
       if (!res.ok) {
-        let errMessage = `Error ${res.status}: ${res.statusText}`;
-        if (responseBody && typeof responseBody === 'object' && 'message' in responseBody) {
-          errMessage = String((responseBody as { message: unknown }).message);
+        let backendMsg = '';
+        if (responseBody && typeof responseBody === 'object') {
+          const b = responseBody as Record<string, unknown>;
+          backendMsg = String(b.message || b.error || b.title || b.detail || '');
+          if (!backendMsg && b.errors && typeof b.errors === 'object') {
+            backendMsg = Object.values(b.errors).flat().join(', ');
+          }
         } else if (typeof responseBody === 'string' && responseBody.length > 0) {
-          errMessage = responseBody.slice(0, 120);
+          backendMsg = responseBody.slice(0, 160);
+        }
+
+        let errMessage = '';
+        switch (res.status) {
+          case 401:
+            errMessage = backendMsg
+              ? `401 Unauthorized: ${backendMsg}`
+              : '401: Authentication/session expired. Please log in again via Administrator Gateway.';
+            break;
+          case 403:
+            errMessage = backendMsg
+              ? `403 Permission denied: ${backendMsg}`
+              : '403: Owner permission denied. Account does not possess Owner privileges on DSCAuth backend.';
+            break;
+          case 404:
+            errMessage = backendMsg
+              ? `404 Not found: ${backendMsg}`
+              : `404: Endpoint does not exist (${method} ${endpoint}).`;
+            break;
+          case 400:
+            errMessage = backendMsg
+              ? `400 Invalid request: ${backendMsg}`
+              : '400: Invalid request structure or missing required payload fields.';
+            break;
+          case 500:
+            errMessage = backendMsg
+              ? `500 DSCAuth server error: ${backendMsg}`
+              : '500: Internal server error on DSCAuth backend.';
+            break;
+          default:
+            errMessage = backendMsg
+              ? `HTTP ${res.status}: ${backendMsg}`
+              : `Error ${res.status}: ${res.statusText}`;
         }
         return { data: null, error: errMessage, status: res.status };
       }
@@ -313,12 +521,27 @@ async function request<T>(
       return { data: responseBody as T, error: null, status: res.status };
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
-      const errorStr =
-        err instanceof Error
-          ? err.name === 'AbortError'
-            ? 'Connection timeout. Render server may be waking up.'
-            : err.message
-          : 'Network error';
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      const errType = err instanceof Error ? err.constructor.name : typeof err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // Section 14 real health diagnostic test
+      let diagInfo = '';
+      try {
+        const diag = await testDSCAuthConnectivity();
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          diagInfo = 'Client network is offline.';
+        } else if (!diag.reachable) {
+          diagInfo = `Host ${API_BASE_URL} unreachable (${diag.error}). Possible DNS/network failure, firewall/ad-blocker, or Render cold start.`;
+        } else {
+          diagInfo = `Host ${API_BASE_URL} is reachable (public endpoint returned HTTP ${diag.status} in ${diag.durationMs}ms), but this ${method} request failed with ${errType}: ${errMsg}.`;
+        }
+      } catch (probeErr: unknown) {
+        diagInfo = `Diagnostic probe error: ${probeErr instanceof Error ? probeErr.message : String(probeErr)}`;
+      }
+
+      // Section 13 Real Network Debugging: Log status, network exception, exception type, message
+      console.log(`[DSCAuth API]\nMETHOD: ${method}\nURL: ${url}\nSTATUS: 0\nNETWORK EXCEPTION: ${errType}: ${errMsg}\nDIAGNOSIS: ${diagInfo}`);
 
       recordLog({
         id: logId,
@@ -326,15 +549,17 @@ async function request<T>(
         method,
         url: endpoint,
         status: 0,
-        statusText: 'Network / CORS Error',
+        statusText: isAbort ? 'Timeout' : 'Network Error',
         durationMs,
-        requestBody: parsedReqBody,
-        error: errorStr,
+        requestBody: sanitizeForLogging(parsedReqBody),
+        error: `${errType}: ${errMsg} (${diagInfo})`,
       });
+
+      const detailedError = `Network Exception on ${method} ${url} -> Status: 0 (${errType}: ${errMsg}). Diagnosis: ${diagInfo}`;
 
       return {
         data: null,
-        error: `${errorStr} (Render free backend may be cold-starting or CORS restricted)`,
+        error: detailedError,
         status: 0,
       };
     }
@@ -361,31 +586,59 @@ async function request<T>(
 // -------------------------------------------------------------------------
 // PUBLIC APIS
 // -------------------------------------------------------------------------
-export async function fetchFreePanel(): Promise<{ data: FreePanelInfo | null; error: string | null }> {
-  const res = await request<FreePanelInfo>('/api/public/free-panel');
-  const cfg = getAppConfig();
+export async function fetchFreePanel(): Promise<{
+  data: FreePanelInfo | null;
+  error: string | null;
+  status: number;
+  url?: string;
+  method?: string;
+}> {
+  const endpoint = '/api/public/free-panel';
+  const res = await request<Record<string, unknown>>(endpoint);
   if (res.error || !res.data) {
-    // Dynamic backend-driven fallback structure without hardcoded external URLs
     return {
-      data: {
-        available: true,
-        username: 'dsc_free_user',
-        password: 'DSC_FreePass_2026',
-        remainingSlots: 14,
-        totalSlots: 50,
-        progress: 72,
-        downloadUrl: cfg.freeLink || '',
-        message: 'Free access slots currently active.',
-      },
-      error: res.error,
+      data: null,
+      error: res.error || 'Free Panel temporarily unavailable.',
+      status: res.status,
+      url: `${API_BASE_URL}${endpoint}`,
+      method: 'GET',
     };
   }
+
+  const raw = res.data;
+  const usedSlots = Number(raw.usedSlots ?? raw.UsedSlots ?? raw.used_slots ?? 0);
+  const maxSlots = Number(raw.maxSlots ?? raw.MaxSlots ?? raw.max_slots ?? 0);
+  const freeUser = String(raw.freeUser ?? raw.FreeUser ?? raw.username ?? raw.Username ?? '').trim();
+  const freePass = String(raw.freePass ?? raw.FreePass ?? raw.password ?? raw.Password ?? raw.keyValue ?? raw.KeyValue ?? '').trim();
+  const freeLink = String(raw.freeLink ?? raw.FreeLink ?? raw.downloadUrl ?? raw.DownloadUrl ?? '').trim();
+
+  const slotsFull = maxSlots > 0 && usedSlots >= maxSlots;
+  const remainingSlots = Math.max(0, maxSlots - usedSlots);
+  const progress = maxSlots > 0 ? Math.min(100, Math.round((usedSlots / maxSlots) * 100)) : 0;
+
   return {
     data: {
-      ...res.data,
-      downloadUrl: res.data.downloadUrl || cfg.freeLink || '',
+      available: !slotsFull,
+      slotsFull,
+      usedSlots,
+      maxSlots,
+      remainingSlots,
+      totalSlots: maxSlots,
+      progress,
+      freeUser,
+      freePass,
+      username: freeUser,
+      password: freePass,
+      freeLink,
+      downloadUrl: freeLink,
+      message: slotsFull
+        ? 'No Slot is Available. Existing users can still download.'
+        : 'Free access slots currently active.',
     },
     error: null,
+    status: res.status,
+    url: `${API_BASE_URL}${endpoint}`,
+    method: 'GET',
   };
 }
 
@@ -552,39 +805,32 @@ export async function fetchUserOrder(
     clearSession();
     return { data: null, error: 'Session expired. Please sign in again.' };
   }
-  if (!res.data) {
-    // Provide standard realistic fallback state
+  if (!res.data || res.error) {
     return {
-      data: {
-        username: 'user_active',
-        plan: 'Gold VIP Plan',
-        expiry: '2026-12-31T23:59:59Z',
-        status: 'Active',
-        key: 'DSC-GOLD-9842-X7B1-99A0',
-        orderId: 'ORD-2026-88412',
-        createdAt: '2026-01-15T10:30:00Z',
-      },
-      error: res.error,
+      data: null,
+      error: res.error || 'No active order or subscription record found for this account.',
     };
   }
 
   const raw = res.data;
   const normalizedOrder: UserOrder = {
-    username: (raw.username as string) || 'user_active',
-    plan: (raw.plan as string) || (raw.tier as string) || 'Gold VIP Plan',
+    username: (raw.username as string) || (raw.Username as string) || '',
+    plan: (raw.plan as string) || (raw.Plan as string) || (raw.tier as string) || 'Standard',
     expiry:
       (raw.expiry as string) ||
+      (raw.Expiry as string) ||
       (raw.expiresAt as string) ||
       (raw.expiration as string) ||
       (raw.expires as string) ||
-      '2026-12-31T23:59:59Z',
-    status: (raw.status as string) || 'Active',
+      '',
+    status: (raw.status as string) || (raw.Status as string) || 'Active',
     key:
       (raw.key as string) ||
+      (raw.Key as string) ||
       (raw.licenseKey as string) ||
       (raw.license as string) ||
-      'DSC-GOLD-9842-X7B1-99A0',
-    orderId: (raw.orderId as string) || (raw.id as string) || 'ORD-2026-88412',
+      '',
+    orderId: (raw.orderId as string) || (raw.OrderId as string) || (raw.id as string) || '',
     createdAt: (raw.createdAt as string) || (raw.created as string) || new Date().toISOString(),
   };
 
@@ -631,17 +877,14 @@ export async function submitCheckout(orderData: {
   );
 
   if (res.error) {
-    // Fallback success for demonstration if server offline
-    const fakeOrderId = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
     return {
-      success: true,
-      orderId: fakeOrderId,
-      message: 'Order created successfully! Pending admin verification.',
+      success: false,
+      message: res.error || 'Failed to submit order. Please check connection and try again.',
     };
   }
   return {
     success: true,
-    orderId: res.data?.orderId || 'ORD-DSC-' + Date.now().toString().slice(-6),
+    orderId: res.data?.orderId,
     message: res.data?.message || 'Order received successfully.',
   };
 }
@@ -678,44 +921,7 @@ export async function adminGetUsers(
     return { users: list, error: null };
   }
   return {
-    users: [
-      {
-        id: 'usr-1',
-        username: 'cyber_phantom',
-        plan: 'Platinum Elite',
-        expiry: '2026-11-20',
-        status: 'active',
-        hwid: 'AND-99182',
-        createdAt: '2026-01-10',
-      },
-      {
-        id: 'usr-2',
-        username: 'night_blade',
-        plan: 'Gold VIP',
-        expiry: '2026-10-14',
-        status: 'active',
-        hwid: 'AND-44120',
-        createdAt: '2026-02-04',
-      },
-      {
-        id: 'usr-3',
-        username: 'neon_pulse',
-        plan: 'Silver Regular',
-        expiry: '2026-08-01',
-        status: 'expired',
-        hwid: 'AND-11928',
-        createdAt: '2025-12-15',
-      },
-      {
-        id: 'usr-4',
-        username: 'zero_cool',
-        plan: 'Free Panel',
-        expiry: '2026-09-30',
-        status: 'active',
-        hwid: 'AND-88736',
-        createdAt: '2026-03-01',
-      },
-    ],
+    users: [],
     error: res.error,
   };
 }
@@ -837,14 +1043,42 @@ export async function adminChangePassword(
 // -------------------------------------------------------------------------
 // OWNER PRIVILEGED APIS
 // -------------------------------------------------------------------------
-export async function ownerProbe(token: string): Promise<boolean> {
-  if (!token) return false;
+export async function checkOwnerAccess(token: string): Promise<{
+  authorized: boolean;
+  status: number;
+  error: string | null;
+}> {
+  if (!token) {
+    return { authorized: false, status: 401, error: 'No authentication token provided.' };
+  }
   const res = await request<{ authorized?: boolean }>('/api/admin/owner/probe', {}, token);
-  if (res.status === 200) return true;
-  if (res.status === 403 || res.status === 401) return false;
-  // If network unreachable, check token claims
-  const claims = extractClaims(token);
-  return claims.isOwner;
+  if (res.status === 200) {
+    return { authorized: true, status: 200, error: null };
+  }
+  if (res.status === 403) {
+    return {
+      authorized: false,
+      status: 403,
+      error: res.error || '403: Admin/Owner permission denied. Owner privileges required on DSCAuth.',
+    };
+  }
+  if (res.status === 401) {
+    return {
+      authorized: false,
+      status: 401,
+      error: res.error || '401: Authentication/session expired. Please log in again.',
+    };
+  }
+  return {
+    authorized: false,
+    status: res.status,
+    error: res.error || `Owner probe returned status ${res.status}`,
+  };
+}
+
+export async function ownerProbe(token: string): Promise<boolean> {
+  const check = await checkOwnerAccess(token);
+  return check.authorized;
 }
 
 export async function ownerGetKeys(
@@ -856,33 +1090,7 @@ export async function ownerGetKeys(
     return { keys: list, error: null };
   }
   return {
-    keys: [
-      {
-        id: 'key-1',
-        key: 'DSC-PLAT-7712-B8X0-112A',
-        plan: 'Platinum Elite',
-        durationDays: 30,
-        status: 'unused',
-        createdAt: '2026-09-01',
-      },
-      {
-        id: 'key-2',
-        key: 'DSC-GOLD-4412-K9L1-889P',
-        plan: 'Gold VIP',
-        durationDays: 60,
-        status: 'used',
-        usedBy: 'night_blade',
-        createdAt: '2026-08-20',
-      },
-      {
-        id: 'key-3',
-        key: 'DSC-SILV-1190-Z3Q2-441K',
-        plan: 'Silver Regular',
-        durationDays: 14,
-        status: 'unused',
-        createdAt: '2026-09-05',
-      },
-    ],
+    keys: [],
     error: res.error,
   };
 }
@@ -956,56 +1164,299 @@ export async function ownerDeleteAdmin(
   return { success: !res.error, message: res.data?.message || res.error || 'Admin account removed.' };
 }
 
+export async function getSystemSettings(
+  token: string
+): Promise<{
+  settings: SystemSettings | null;
+  raw: unknown;
+  error: string | null;
+  status: number;
+  method: string;
+  url: string;
+}> {
+  const endpoint = '/api/admin/settings/all';
+  const url = `${API_BASE_URL}${endpoint}`;
+  const res = await request<unknown>(endpoint, {}, token);
+  if (res.data && res.status >= 200 && res.status < 300) {
+    const mapped = mapBackendSettings(res.data);
+    saveAppConfig(mapped);
+    return {
+      settings: mapped,
+      raw: res.data,
+      error: null,
+      status: res.status,
+      method: 'GET',
+      url,
+    };
+  }
+  return {
+    settings: null,
+    raw: res.data,
+    error: res.error || `GET ${url} returned status ${res.status}`,
+    status: res.status,
+    method: 'GET',
+    url,
+  };
+}
+
+export async function updateSystemSettings(
+  token: string,
+  changes: Partial<SystemSettings>,
+  _cachedSettings?: SystemSettings | null
+): Promise<{
+  success: boolean;
+  settings: SystemSettings | null;
+  message: string;
+  status: number;
+  method: string;
+  url: string;
+}> {
+  const updateEndpoint = '/api/admin/settings/update';
+  const updateUrl = `${API_BASE_URL}${updateEndpoint}`;
+
+  // STEP 1: Strict Rule: Debug GET /api/admin/settings/all first
+  // "Before attempting PUT, make the application successfully perform:
+  // GET https://dscauth.onrender.com/api/admin/settings/all
+  // If this GET fails, STOP. Do not attempt to fix the PUT first."
+  const fetchRes = await getSystemSettings(token);
+  if (!fetchRes.settings) {
+    return {
+      success: false,
+      settings: null,
+      message: `Cannot update settings: GET /api/admin/settings/all failed (Status ${fetchRes.status}): ${fetchRes.error || 'Server record could not be retrieved.'}`,
+      status: fetchRes.status || 0,
+      method: 'GET',
+      url: fetchRes.url,
+    };
+  }
+
+  const baseRecord: Record<string, any> = {
+    ...(fetchRes.raw && typeof fetchRes.raw === 'object' ? fetchRes.raw : {}),
+    ...fetchRes.settings,
+  };
+
+  // Merge changes into complete record, preserving all existing keys and id
+  const fullPayload: Record<string, unknown> = {
+    ...baseRecord,
+    id: baseRecord.id ?? baseRecord.Id ?? 1,
+    isMaintenanceMode:
+      changes.isMaintenanceMode !== undefined
+        ? Boolean(changes.isMaintenanceMode)
+        : changes.maintenance !== undefined
+        ? Boolean(changes.maintenance)
+        : Boolean(baseRecord.isMaintenanceMode ?? baseRecord.maintenance ?? false),
+    maintenanceReason:
+      changes.maintenanceReason !== undefined
+        ? String(changes.maintenanceReason)
+        : String(baseRecord.maintenanceReason || 'Panel Is Ready to use'),
+    maxFreeSlots:
+      changes.maxFreeSlots !== undefined
+        ? Number(changes.maxFreeSlots)
+        : Number(baseRecord.maxFreeSlots ?? 50),
+    latestVersion:
+      changes.latestVersion !== undefined
+        ? String(changes.latestVersion)
+        : String(baseRecord.latestVersion || '3.5'),
+    updateUrl:
+      changes.updateUrl !== undefined
+        ? String(changes.updateUrl)
+        : changes.downloadLink !== undefined
+        ? String(changes.downloadLink)
+        : String(baseRecord.updateUrl || baseRecord.downloadLink || ''),
+    showHomeDownloadBtn:
+      changes.showHomeDownloadBtn !== undefined
+        ? Boolean(changes.showHomeDownloadBtn)
+        : Boolean(baseRecord.showHomeDownloadBtn),
+    freeValidDays:
+      changes.freeValidDays !== undefined
+        ? Number(changes.freeValidDays)
+        : Number(baseRecord.freeValidDays ?? 1),
+    freeUsername:
+      changes.freeUsername !== undefined
+        ? String(changes.freeUsername)
+        : String(baseRecord.freeUsername ?? baseRecord.FreeUsername ?? ''),
+    freePassword:
+      changes.freePassword !== undefined
+        ? String(changes.freePassword)
+        : String(baseRecord.freePassword ?? baseRecord.FreePassword ?? ''),
+    freeLink:
+      changes.freeLink !== undefined
+        ? String(changes.freeLink)
+        : String(baseRecord.freeLink ?? baseRecord.FreeLink ?? ''),
+    streamerLink:
+      changes.streamerLink !== undefined
+        ? String(changes.streamerLink)
+        : String(baseRecord.streamerLink ?? baseRecord.StreamerLink ?? ''),
+    sniperLink:
+      changes.sniperLink !== undefined
+        ? String(changes.sniperLink)
+        : String(baseRecord.sniperLink ?? baseRecord.SniperLink ?? ''),
+    specialLink:
+      changes.specialLink !== undefined
+        ? String(changes.specialLink)
+        : String(baseRecord.specialLink ?? baseRecord.SpecialLink ?? ''),
+    aimbotLink:
+      changes.aimbotLink !== undefined
+        ? String(changes.aimbotLink)
+        : String(baseRecord.aimbotLink ?? baseRecord.AimbotLink ?? ''),
+    premiumLink:
+      changes.premiumLink !== undefined
+        ? String(changes.premiumLink)
+        : String(baseRecord.premiumLink ?? baseRecord.PremiumLink ?? ''),
+    customisedLink:
+      changes.customisedLink !== undefined
+        ? String(changes.customisedLink)
+        : String(baseRecord.customisedLink ?? baseRecord.CustomisedLink ?? ''),
+  };
+
+  // Step 2: PUT /api/admin/settings/update with complete database settings payload
+  const putRes = await request<{ message?: string; success?: boolean }>(
+    updateEndpoint,
+    {
+      method: 'PUT',
+      body: JSON.stringify(fullPayload),
+    },
+    token
+  );
+
+  if (putRes.error || putRes.status < 200 || putRes.status >= 300) {
+    return {
+      success: false,
+      settings: mapBackendSettings(baseRecord),
+      message: putRes.error || `PUT ${updateUrl} failed with status ${putRes.status}`,
+      status: putRes.status,
+      method: 'PUT',
+      url: updateUrl,
+    };
+  }
+
+  // Step 3: Re-fetch GET /api/admin/settings/all to refresh server state (source of truth)
+  const refreshRes = await getSystemSettings(token);
+  const updatedSettings = refreshRes.settings || mapBackendSettings(fullPayload);
+  saveAppConfig(updatedSettings);
+
+  return {
+    success: true,
+    settings: updatedSettings,
+    message: putRes.data?.message || 'Settings updated successfully in database.',
+    status: putRes.status,
+    method: 'PUT',
+    url: updateUrl,
+  };
+}
+
+export async function getMaintenanceStatus(token?: string): Promise<{
+  isMaintenanceMode: boolean;
+  maintenanceReason: string;
+  error: string | null;
+  status: number;
+}> {
+  if (token) {
+    const res = await getSystemSettings(token);
+    if (res.settings) {
+      return {
+        isMaintenanceMode: Boolean(res.settings.isMaintenanceMode),
+        maintenanceReason: res.settings.maintenanceReason || 'Panel Is Ready to use',
+        error: null,
+        status: res.status,
+      };
+    }
+  }
+
+  const cfg = getAppConfig();
+  return {
+    isMaintenanceMode: Boolean(cfg.isMaintenanceMode ?? cfg.maintenance),
+    maintenanceReason: cfg.maintenanceReason || 'Panel Is Ready to use',
+    error: null,
+    status: 200,
+  };
+}
+
+export async function toggleMaintenance(
+  token: string,
+  targetState?: boolean
+): Promise<{
+  success: boolean;
+  isMaintenanceMode: boolean;
+  message: string;
+  status: number;
+}> {
+  let nextState = targetState;
+  if (nextState === undefined) {
+    const current = await getMaintenanceStatus(token);
+    nextState = !current.isMaintenanceMode;
+  }
+
+  // Section 10: Send both casing formats for maximum backend compatibility
+  const res = await request<{
+    isMaintenanceMode?: boolean;
+    IsMaintenanceMode?: boolean;
+    maintenance?: boolean;
+    message?: string;
+    success?: boolean;
+  }>(
+    '/api/admin/maintenance/toggle',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        isMaintenanceMode: nextState,
+        IsMaintenanceMode: nextState,
+      }),
+    },
+    token
+  );
+
+  if (res.error || res.status < 200 || res.status >= 300) {
+    return {
+      success: false,
+      isMaintenanceMode: !nextState,
+      message: res.error || `Failed to toggle maintenance mode (status ${res.status})`,
+      status: res.status,
+    };
+  }
+
+  const finalMode =
+    res.data?.isMaintenanceMode !== undefined
+      ? Boolean(res.data.isMaintenanceMode)
+      : res.data?.IsMaintenanceMode !== undefined
+      ? Boolean(res.data.IsMaintenanceMode)
+      : res.data?.maintenance !== undefined
+      ? Boolean(res.data.maintenance)
+      : nextState;
+
+  saveAppConfig({ isMaintenanceMode: finalMode, maintenance: finalMode });
+
+  return {
+    success: true,
+    isMaintenanceMode: finalMode,
+    message: res.data?.message || `Maintenance mode set to ${finalMode ? 'ON' : 'OFF'}`,
+    status: res.status,
+  };
+}
+
+// Backward-compatible aliases
 export async function ownerGetSettings(
   token: string
 ): Promise<{ settings: SystemSettings | null; error: string | null }> {
-  const res = await request<SystemSettings>('/api/admin/settings/all', {}, token);
-  if (res.data) {
-    const updated = saveAppConfig(res.data);
-    return { settings: updated, error: null };
-  }
-  return {
-    settings: getAppConfig(),
-    error: res.error,
-  };
+  const r = await getSystemSettings(token);
+  return { settings: r.settings, error: r.error };
 }
 
 export async function ownerUpdateSettings(
   token: string,
-  settings: Partial<SystemSettings>
-): Promise<{ success: boolean; message: string }> {
-  // Update local dynamic config cache and broadcast to all screens immediately
-  saveAppConfig(settings);
-
-  const res = await request<{ message?: string }>(
-    '/api/admin/settings/update',
-    {
-      method: 'POST',
-      body: JSON.stringify(settings),
-    },
-    token
-  );
-  return { success: !res.error, message: res.data?.message || res.error || 'Settings updated.' };
+  settings: Partial<SystemSettings>,
+  current?: SystemSettings | null
+): Promise<{ success: boolean; message: string; settings?: SystemSettings | null }> {
+  const r = await updateSystemSettings(token, settings, current);
+  return { success: r.success, message: r.message, settings: r.settings };
 }
 
 export async function ownerToggleMaintenance(
-  token: string
+  token: string,
+  targetState?: boolean
 ): Promise<{ success: boolean; maintenance: boolean; message: string }> {
-  const res = await request<{ maintenance?: boolean; message?: string }>(
-    '/api/admin/maintenance/toggle',
-    {
-      method: 'POST',
-    },
-    token
-  );
-  if (!res.error) {
-    saveAppConfig({ maintenance: Boolean(res.data?.maintenance) });
-  }
-  return {
-    success: !res.error,
-    maintenance: Boolean(res.data?.maintenance),
-    message: res.data?.message || res.error || 'Maintenance mode toggled.',
-  };
+  const r = await toggleMaintenance(token, targetState);
+  return { success: r.success, maintenance: r.isMaintenanceMode, message: r.message };
 }
 
 export async function ownerGetPanelUpdates(
@@ -1048,23 +1499,17 @@ export async function ownerGetUsers(
     const rawList = Array.isArray(res.data) ? res.data : (res.data as { users?: AdminUser[] }).users || [];
     const users: AdminUser[] = rawList.map((u: any, idx: number) => ({
       id: String(u.id || u.Id || `user-${idx + 1}`),
-      username: u.username || u.Username || 'Unknown',
-      plan: u.plan || u.Plan || 'Standard VIP',
-      expiry: u.expiryTime || u.ExpiryTime || u.expiry || '2026-12-31',
+      username: u.username || u.Username || '',
+      plan: u.plan || u.Plan || '',
+      expiry: u.expiryTime || u.ExpiryTime || u.expiry || '',
       status: u.isBanned || u.IsBanned ? 'suspended' : 'active',
       hwid: u.hwid || u.HWID || undefined,
-      createdAt: u.registrationTime || u.RegistrationTime || u.createdAt || '2026-01-01',
+      createdAt: u.registrationTime || u.RegistrationTime || u.createdAt || '',
     }));
     return { users, error: null };
   }
   return {
-    users: [
-      { id: 'usr-1', username: 'shadow_operator', plan: 'Platinum Elite', expiry: '2026-10-15', status: 'active', hwid: 'HWID-98A1-4402-BF19', createdAt: '2026-08-10' },
-      { id: 'usr-2', username: 'cyber_ghost', plan: 'Gold VIP', expiry: '2026-09-30', status: 'active', hwid: 'HWID-1120-77C3-AA01', createdAt: '2026-08-15' },
-      { id: 'usr-3', username: 'navi_strike', plan: 'Silver Regular', expiry: '2026-09-20', status: 'active', hwid: 'HWID-4589-99E1-0023', createdAt: '2026-08-20' },
-      { id: 'usr-4', username: 'rogue_echo', plan: 'Platinum Elite', expiry: '2026-08-01', status: 'expired', hwid: 'HWID-7734-22A9-5509', createdAt: '2026-07-01' },
-      { id: 'usr-5', username: 'null_pointer', plan: 'Gold VIP', expiry: '2026-09-25', status: 'suspended', hwid: 'HWID-3390-11B5-9988', createdAt: '2026-08-05' },
-    ],
+    users: [],
     error: res.error,
   };
 }
@@ -1106,22 +1551,18 @@ export async function ownerGetFreeUsers(
     const rawList = Array.isArray(res.data) ? res.data : (res.data as { freeUsers?: FreeUserRecord[] }).freeUsers || [];
     const freeUsers: FreeUserRecord[] = rawList.map((f: any, idx: number) => ({
       id: String(f.id || f.Id || `free-${idx + 1}`),
-      username: f.username || f.Username || 'dsc_free_slot',
+      username: f.username || f.Username || '',
       hwid: f.hwid || f.HWID || undefined,
       captchaToken: f.captchaToken || f.CaptchaToken || undefined,
       isBanned: Boolean(f.isBanned || f.IsBanned),
       failedLoginAttempts: f.failedLoginAttempts || f.FailedLoginAttempts || 0,
-      firstLoginTime: f.firstLoginTime || f.FirstLoginTime || '2026-09-01',
-      lastLoginTime: f.lastLoginTime || f.LastLoginTime || '2026-09-10',
+      firstLoginTime: f.firstLoginTime || f.FirstLoginTime || '',
+      lastLoginTime: f.lastLoginTime || f.LastLoginTime || '',
     }));
     return { freeUsers, error: null };
   }
   return {
-    freeUsers: [
-      { id: 'free-1', username: 'free_agent_01', hwid: 'HWID-FREE-0012-A', isBanned: false, failedLoginAttempts: 0, firstLoginTime: '2026-09-08 10:20', lastLoginTime: '2026-09-10 14:15' },
-      { id: 'free-2', username: 'free_agent_02', hwid: 'HWID-FREE-0099-B', isBanned: false, failedLoginAttempts: 1, firstLoginTime: '2026-09-09 11:00', lastLoginTime: '2026-09-10 09:30' },
-      { id: 'free-3', username: 'free_agent_03', hwid: 'HWID-FREE-4411-Z', isBanned: true, failedLoginAttempts: 4, firstLoginTime: '2026-09-05 18:40', lastLoginTime: '2026-09-07 22:10' },
-    ],
+    freeUsers: [],
     error: res.error,
   };
 }
@@ -1130,14 +1571,24 @@ export async function ownerUpdateFreeUser(
   token: string,
   freeUser: Partial<FreeUserRecord>
 ): Promise<{ success: boolean; message: string }> {
-  const res = await request<{ message?: string }>(
+  let res = await request<{ message?: string }>(
     '/api/admin/manage/free-user/update',
     {
-      method: 'POST',
+      method: 'PUT',
       body: JSON.stringify(freeUser),
     },
     token
   );
+  if (res.status === 404 || res.status === 405) {
+    res = await request<{ message?: string }>(
+      '/api/admin/manage/free-user/update',
+      {
+        method: 'POST',
+        body: JSON.stringify(freeUser),
+      },
+      token
+    );
+  }
   return { success: !res.error, message: res.data?.message || res.error || 'Free user updated.' };
 }
 
@@ -1163,18 +1614,15 @@ export async function ownerSetGlobalUserPass(
     maxFreeSlots?: number | string;
     freeValidDays?: number | string;
     showHomeDownloadBtn?: boolean;
-  }
-): Promise<{ success: boolean; message: string }> {
-  saveAppConfig(config);
-  const res = await request<{ message?: string }>(
-    '/api/admin/settings/update',
-    {
-      method: 'POST',
-      body: JSON.stringify(config),
-    },
-    token
-  );
-  return { success: !res.error, message: res.data?.message || res.error || 'Global UserPass configuration updated.' };
+  },
+  existingRecord?: SystemSettings | null
+): Promise<{ success: boolean; message: string; settings?: SystemSettings | null }> {
+  const result = await updateSystemSettings(token, config, existingRecord);
+  return {
+    success: result.success,
+    message: result.message,
+    settings: result.settings,
+  };
 }
 
 export async function ownerGetPanelStatus(
@@ -1230,22 +1678,17 @@ export async function ownerGetAllOrders(
     const rawList = Array.isArray(res.data) ? res.data : (res.data as { orders?: AdminOrder[] }).orders || [];
     const orders: AdminOrder[] = rawList.map((o: any, idx: number) => ({
       id: String(o.id || o.Id || `order-${idx + 1}`),
-      username: o.username || o.Username || 'Customer',
-      plan: o.plan || o.Plan || 'VIP Plan',
-      price: o.price || o.Price || '$49.99',
+      username: o.username || o.Username || '',
+      plan: o.plan || o.Plan || '',
+      price: o.price || o.Price || '',
       status: (o.status || o.Status || 'pending').toLowerCase() as 'pending' | 'approved' | 'rejected',
       paymentProof: o.paymentProof || o.PaymentProof || undefined,
-      createdAt: o.createdAt || o.CreatedAt || '2026-09-09',
+      createdAt: o.createdAt || o.CreatedAt || '',
     }));
     return { orders, error: null };
   }
   return {
-    orders: [
-      { id: 'ord-101', username: 'viper_lead', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'pending', createdAt: '2026-09-09 18:22' },
-      { id: 'ord-102', username: 'matrix_apex', plan: 'Gold VIP (60 Days)', price: '$119.99', status: 'approved', createdAt: '2026-09-08 14:05' },
-      { id: 'ord-103', username: 'ghost_pulse', plan: 'Silver Regular (14 Days)', price: '$29.99', status: 'pending', createdAt: '2026-09-10 08:30' },
-      { id: 'ord-104', username: 'test_subscriber', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'rejected', createdAt: '2026-09-07 19:40' },
-    ],
+    orders: [],
     error: res.error,
   };
 }
@@ -1320,16 +1763,26 @@ function handleSimulatedCall<T>(
   const cfg = getAppConfig();
 
   if (endpoint === '/api/public/free-panel') {
+    const freeUser = cfg.freeUsername || '';
+    const freePass = cfg.freePassword || '';
+    const usedSlots = 0;
+    const maxSlots = Number(cfg.maxFreeSlots) || 0;
     return {
       data: {
         available: true,
-        username: cfg.freeUsername || 'dsc_free_demo',
-        password: cfg.freePassword || 'DSC_FreePass_2026',
-        remainingSlots: 18,
-        totalSlots: Number(cfg.maxFreeSlots) || 50,
-        progress: 64,
+        slotsFull: false,
+        usedSlots,
+        maxSlots,
+        remainingSlots: maxSlots,
+        totalSlots: maxSlots,
+        progress: 0,
+        freeUser,
+        freePass,
+        username: freeUser,
+        password: freePass,
+        freeLink: cfg.freeLink || '',
         downloadUrl: cfg.freeLink || '',
-        message: 'Simulated Free Access Slots Online',
+        message: 'Free access slots currently active.',
       } as unknown as T,
       error: null,
       status: 200,
@@ -1342,7 +1795,7 @@ function handleSimulatedCall<T>(
         isMaintenanceMode: Boolean(cfg.maintenance),
         maintenanceReason: cfg.maintenanceReason || 'Panel Is Ready to use',
         latestVersion: cfg.latestVersion || '3.5',
-        updateUrl: cfg.downloadLink || cfg.apkUrl || 'https://dscweb.me/',
+        updateUrl: cfg.downloadLink || cfg.apkUrl || '',
         showHomeDownloadBtn: Boolean(cfg.showHomeDownloadBtn),
         freeLink: cfg.freeLink || '',
       } as unknown as T,
@@ -1361,13 +1814,7 @@ function handleSimulatedCall<T>(
 
   if (endpoint === '/api/admin/users') {
     return {
-      data: [
-        { id: '1', username: 'shadow_operator', plan: 'Platinum Elite', expiryTime: '2026-10-15', isBanned: false, hwid: 'HWID-98A1-4402-BF19', registrationTime: '2026-08-10' },
-        { id: '2', username: 'cyber_ghost', plan: 'Gold VIP', expiryTime: '2026-09-30', isBanned: false, hwid: 'HWID-1120-77C3-AA01', registrationTime: '2026-08-15' },
-        { id: '3', username: 'navi_strike', plan: 'Silver Regular', expiryTime: '2026-09-20', isBanned: false, hwid: 'HWID-4589-99E1-0023', registrationTime: '2026-08-20' },
-        { id: '4', username: 'rogue_echo', plan: 'Platinum Elite', expiryTime: '2026-08-01', isBanned: false, hwid: 'HWID-7734-22A9-5509', registrationTime: '2026-07-01' },
-        { id: '5', username: 'null_pointer', plan: 'Gold VIP', expiryTime: '2026-09-25', isBanned: true, hwid: 'HWID-3390-11B5-9988', registrationTime: '2026-08-05' },
-      ] as unknown as T,
+      data: [] as unknown as T,
       error: null,
       status: 200,
     };
@@ -1375,11 +1822,7 @@ function handleSimulatedCall<T>(
 
   if (endpoint === '/api/admin/free-users') {
     return {
-      data: [
-        { id: '1', username: 'free_agent_01', hwid: 'HWID-FREE-0012-A', isBanned: false, failedLoginAttempts: 0, firstLoginTime: '2026-09-08 10:20', lastLoginTime: '2026-09-10 14:15' },
-        { id: '2', username: 'free_agent_02', hwid: 'HWID-FREE-0099-B', isBanned: false, failedLoginAttempts: 1, firstLoginTime: '2026-09-09 11:00', lastLoginTime: '2026-09-10 09:30' },
-        { id: '3', username: 'free_agent_03', hwid: 'HWID-FREE-4411-Z', isBanned: true, failedLoginAttempts: 4, firstLoginTime: '2026-09-05 18:40', lastLoginTime: '2026-09-07 22:10' },
-      ] as unknown as T,
+      data: [] as unknown as T,
       error: null,
       status: 200,
     };
@@ -1387,11 +1830,7 @@ function handleSimulatedCall<T>(
 
   if (endpoint === '/api/admin/keys') {
     return {
-      data: [
-        { id: 'key-1', key: 'DSC-PLAT-7712-B8X0-112A', plan: 'Platinum Elite', durationDays: 30, status: 'unused', createdAt: '2026-09-01' },
-        { id: 'key-2', key: 'DSC-GOLD-4412-K9L1-889P', plan: 'Gold VIP', durationDays: 60, status: 'used', usedBy: 'night_blade', createdAt: '2026-08-20' },
-        { id: 'key-3', key: 'DSC-SILV-1190-Z3Q2-441K', plan: 'Silver Regular', durationDays: 14, status: 'unused', createdAt: '2026-09-05' },
-      ] as unknown as T,
+      data: [] as unknown as T,
       error: null,
       status: 200,
     };
@@ -1399,11 +1838,7 @@ function handleSimulatedCall<T>(
 
   if (endpoint === '/api/admin/manage/admins') {
     return {
-      data: [
-        { id: 'adm-1', username: 'admin', role: 'Owner', isOwner: true, createdAt: '2025-01-01' },
-        { id: 'adm-2', username: 'dsc_moderator', role: 'Admin', isOwner: false, createdAt: '2026-02-14' },
-        { id: 'adm-3', username: 'support_lead', role: 'Admin', isOwner: false, createdAt: '2026-06-01' },
-      ] as unknown as T,
+      data: [] as unknown as T,
       error: null,
       status: 200,
     };
@@ -1411,12 +1846,48 @@ function handleSimulatedCall<T>(
 
   if (endpoint === '/api/admin/orders/all' || endpoint === '/api/admin/orders/pending') {
     return {
-      data: [
-        { id: 'ord-101', username: 'viper_lead', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'pending', createdAt: '2026-09-09 18:22' },
-        { id: 'ord-102', username: 'matrix_apex', plan: 'Gold VIP (60 Days)', price: '$119.99', status: 'approved', createdAt: '2026-09-08 14:05' },
-        { id: 'ord-103', username: 'ghost_pulse', plan: 'Silver Regular (14 Days)', price: '$29.99', status: 'pending', createdAt: '2026-09-10 08:30' },
-        { id: 'ord-104', username: 'test_subscriber', plan: 'Platinum Elite (30 Days)', price: '$69.99', status: 'rejected', createdAt: '2026-09-07 19:40' },
-      ] as unknown as T,
+      data: [] as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/maintenance') {
+    return {
+      data: {
+        isMaintenanceMode: Boolean(cfg.isMaintenanceMode ?? cfg.maintenance),
+        maintenanceReason: cfg.maintenanceReason || 'Panel Is Ready to use',
+      } as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/maintenance/toggle' && method === 'POST') {
+    const nextMode = (_body as any)?.isMaintenanceMode !== undefined
+      ? Boolean((_body as any).isMaintenanceMode)
+      : !Boolean(cfg.isMaintenanceMode ?? cfg.maintenance);
+    saveAppConfig({ isMaintenanceMode: nextMode, maintenance: nextMode });
+    return {
+      data: {
+        success: true,
+        isMaintenanceMode: nextMode,
+        message: `Maintenance mode is now ${nextMode ? 'ON' : 'OFF'}`,
+      } as unknown as T,
+      error: null,
+      status: 200,
+    };
+  }
+
+  if (endpoint === '/api/admin/settings/update' && (method === 'PUT' || method === 'POST')) {
+    if (_body && typeof _body === 'object') {
+      saveAppConfig(_body as any);
+    }
+    return {
+      data: {
+        success: true,
+        message: 'System settings updated successfully.',
+      } as unknown as T,
       error: null,
       status: 200,
     };
@@ -1424,7 +1895,25 @@ function handleSimulatedCall<T>(
 
   if (endpoint === '/api/admin/settings/all') {
     return {
-      data: cfg as unknown as T,
+      data: {
+        id: cfg.id || 1,
+        isMaintenanceMode: Boolean(cfg.isMaintenanceMode ?? cfg.maintenance),
+        maintenanceReason: cfg.maintenanceReason || 'Panel Is Ready to use',
+        maxFreeSlots: cfg.maxFreeSlots || 50,
+        latestVersion: cfg.latestVersion || '3.5',
+        updateUrl: cfg.updateUrl || cfg.downloadLink || cfg.apkUrl || '',
+        showHomeDownloadBtn: Boolean(cfg.showHomeDownloadBtn),
+        freeValidDays: cfg.freeValidDays || 1,
+        freeUsername: cfg.freeUsername || '',
+        freePassword: cfg.freePassword || '',
+        freeLink: cfg.freeLink || '',
+        streamerLink: cfg.streamerLink || '',
+        sniperLink: cfg.sniperLink || '',
+        specialLink: cfg.specialLink || '',
+        aimbotLink: cfg.aimbotLink || '',
+        premiumLink: cfg.premiumLink || '',
+        customisedLink: cfg.customisedLink || '',
+      } as unknown as T,
       error: null,
       status: 200,
     };

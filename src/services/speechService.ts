@@ -1,4 +1,5 @@
 // Speech-to-Text (STT) and Text-to-Speech (TTS) Service for MJ Assistant
+import { wakeWordEngine } from './wakeWordService';
 
 export type AssistantVoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'error';
 
@@ -207,6 +208,7 @@ export function startVoiceListening(
     recognition.lang = 'en-IN';
 
     recognition.onstart = () => {
+      wakeWordEngine.suspendForProcessing(true);
       onStateChange('listening');
     };
 
@@ -242,6 +244,7 @@ export function startVoiceListening(
 
     recognition.onend = () => {
       activeRecognition = null;
+      wakeWordEngine.suspendForProcessing(false);
     };
 
     activeRecognition = recognition;
@@ -252,6 +255,7 @@ export function startVoiceListening(
         recognition.stop();
       } catch {}
       activeRecognition = null;
+      wakeWordEngine.suspendForProcessing(false);
       onStateChange('idle');
     };
   } catch (err: unknown) {
@@ -385,14 +389,17 @@ export function speakText(
   }
 
   utterance.onstart = () => {
+    wakeWordEngine.suspendForTTS(true);
     if (onStart) onStart();
   };
 
   utterance.onend = () => {
+    wakeWordEngine.suspendForTTS(false);
     if (onEnd) onEnd();
   };
 
   utterance.onerror = () => {
+    wakeWordEngine.suspendForTTS(false);
     if (onEnd) onEnd();
   };
 
@@ -411,6 +418,7 @@ export function stopSpeaking() {
     try {
       window.speechSynthesis.cancel();
     } catch {}
+    wakeWordEngine.suspendForTTS(false);
   }
 }
 

@@ -15,7 +15,7 @@ class UserRepository(private val service: DscAuthService) {
             if (res.isSuccessful && res.body() != null) {
                 NetworkResult.Success(res.body()!!)
             } else {
-                // Return default state if server cold-starting
+                // Fallback default state
                 NetworkResult.Success(
                     UserOrder(
                         username = "user_active",
