@@ -30,4 +30,6 @@ object ApiClient {
 
         return retrofit.create(DscAuthService::class.java)
     }
+
+    fun create(tokenProvider: () -> String?): DscAuthService = createService(tokenProvider)
 }

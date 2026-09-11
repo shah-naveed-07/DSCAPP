@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, FileCode, Folder, Download, Terminal } from 'lucide-react';
-import { getAndroidProjectFiles } from '../services/androidProjectGenerator';
+import { X, Copy, Check, FileCode, Folder, Download, Terminal, Archive, Loader2 } from 'lucide-react';
+import { getAndroidProjectFiles, createAndroidProjectZip } from '../services/androidProjectGenerator';
 
 interface Props {
   onClose: () => void;
@@ -15,12 +15,32 @@ export const AndroidCodeModal: React.FC<Props> = ({ onClose }) => {
   const fileKeys = Object.keys(fileMap);
   const [selectedFile, setSelectedFile] = useState<string>(fileKeys[0] || '');
   const [copied, setCopied] = useState(false);
+  const [isZipping, setIsZipping] = useState(false);
 
   const handleCopy = () => {
     if (fileMap[selectedFile]) {
       navigator.clipboard.writeText(fileMap[selectedFile]);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    try {
+      setIsZipping(true);
+      const zipBlob = await createAndroidProjectZip();
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'DSCWeb-Android-Studio-Project.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to generate ZIP project:', err);
+    } finally {
+      setIsZipping(false);
     }
   };
 
@@ -62,11 +82,21 @@ export const AndroidCodeModal: React.FC<Props> = ({ onClose }) => {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={handleDownloadZip}
+              disabled={isZipping}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+              title="Download entire ready-to-open Android Studio project directory as .ZIP"
+            >
+              {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+              <span>{isZipping ? 'Generating...' : 'Download Project (.zip)'}</span>
+            </button>
+            <button
               onClick={handleDownloadAll}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 text-xs font-semibold transition-all"
+              title="Export all source files as single annotated text file"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export Code</span>
+              <span>Export Text</span>
             </button>
             <button
               onClick={onClose}

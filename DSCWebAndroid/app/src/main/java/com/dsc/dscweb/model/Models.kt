@@ -37,6 +37,19 @@ data class AdminUser(
     val status: String = "active",
     val hwid: String? = null,
     val createdAt: String = ""
+) {
+    val isBanned: Boolean
+        get() = status.equals("banned", ignoreCase = true) || status.equals("suspended", ignoreCase = true)
+}
+
+typealias UserRecord = AdminUser
+typealias Order = AdminOrder
+typealias KeyRecord = AdminKey
+
+data class UserPassSettings(
+    val username: String = "dsc_free_user",
+    val password: String = "DSC_FreePass_2026",
+    val totalSlots: Int = 50
 )
 
 data class AdminOrder(

@@ -77,6 +77,14 @@ class AdminRepository(private val service: DscAuthService) {
         }
     }
 
+    suspend fun fetchOrders(): NetworkResult<List<AdminOrder>> = fetchPendingOrders()
+
+    suspend fun setUserBanned(username: String, banned: Boolean): NetworkResult<String> = withContext(Dispatchers.IO) {
+        val user = fetchUsers().getOrNull()?.find { it.username.equals(username, ignoreCase = true) }
+        val updated = (user ?: AdminUser(username = username)).copy(status = if (banned) "banned" else "active")
+        updateUser(updated)
+    }
+
     suspend fun updateOrderDecision(orderId: String, mode: String): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
             val res = service.updateOrderDecision(mode, orderId)

@@ -40,6 +40,8 @@ class OwnerRepository(
         }
     }
 
+    suspend fun fetchKeys(): NetworkResult<List<AdminKey>> = getKeys()
+
     suspend fun createKey(plan: String, durationDays: Int): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
             val res = service.createKey(CreateKeyRequest(plan, durationDays))
@@ -78,6 +80,8 @@ class OwnerRepository(
             NetworkResult.Success(fallbackAdmins)
         }
     }
+
+    suspend fun fetchAdmins(): NetworkResult<List<AdminAccount>> = getAdmins()
 
     suspend fun deleteAdmin(adminId: String): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
@@ -129,6 +133,21 @@ class OwnerRepository(
             } else {
                 NetworkResult.Error(res.errorBody()?.string() ?: "Failed to toggle maintenance")
             }
+        } catch (e: Exception) {
+            NetworkResult.Error(e.localizedMessage ?: "Network error")
+        }
+    }
+
+    suspend fun toggleMaintenance(enabled: Boolean): NetworkResult<Boolean> = toggleMaintenance()
+
+    suspend fun updateUserPass(user: String, pass: String, slots: Int): NetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val currentSettings = getSettings().getOrNull() ?: SystemSettings()
+            updateSettings(
+                currentSettings.copy(
+                    announcement = "Free User: $user, Slots: $slots"
+                )
+            )
         } catch (e: Exception) {
             NetworkResult.Error(e.localizedMessage ?: "Network error")
         }

@@ -56,19 +56,21 @@ class MainActivity : ComponentActivity() {
         // 1. Initialize core managers and repositories
         val sessionDataStore = SessionDataStore(applicationContext)
         val deviceIdProvider = DeviceIdProvider(applicationContext)
-        val apiService = ApiClient.create(sessionDataStore)
+        val authManager = AuthManager(sessionDataStore)
+        val apiService = ApiClient.createService { authManager.getToken() }
 
-        val authRepository = AuthRepository(apiService, sessionDataStore, deviceIdProvider)
-        val userRepository = UserRepository(apiService, sessionDataStore)
+        val authRepository = AuthRepository(apiService, authManager, deviceIdProvider)
+        val userRepository = UserRepository(apiService)
         val adminRepository = AdminRepository(apiService)
-        val ownerRepository = OwnerRepository(apiService)
-        val publicRepository = PublicRepository(apiService, sessionDataStore)
+        val ownerRepository = OwnerRepository(apiService, sessionDataStore)
+        val publicRepository = PublicRepository(apiService)
 
         voiceManager = MjVoiceManager(applicationContext)
 
         setContent {
             DSCWebTheme {
                 MainAppContent(
+                    authManager = authManager,
                     authRepository = authRepository,
                     userRepository = userRepository,
                     adminRepository = adminRepository,
@@ -90,6 +92,7 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppContent(
+    authManager: AuthManager,
     authRepository: AuthRepository,
     userRepository: UserRepository,
     adminRepository: AdminRepository,
@@ -103,7 +106,7 @@ fun MainAppContent(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val session by AuthManager.session.collectAsState()
+    val session by authManager.currentSession.collectAsState()
 
     var isMjSheetVisible by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)

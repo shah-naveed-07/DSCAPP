@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Download, FileCode, Smartphone, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle } from 'lucide-react';
+import { Download, FileCode, Smartphone, Terminal, ChevronDown, ChevronUp, CheckCircle, AlertCircle, Archive, Loader2 } from 'lucide-react';
 import { DownloadItem, SystemSettings } from '../../types';
 import { getAppConfig, subscribeAppConfig } from '../../services/api';
+import { createAndroidProjectZip } from '../../services/androidProjectGenerator';
 
 export const DownloadsScreen: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<'All' | 'Android' | 'Panel' | 'Tools'>('All');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [config, setConfig] = useState<SystemSettings>(getAppConfig());
   const [notice, setNotice] = useState<string | null>(null);
+  const [isGeneratingZip, setIsGeneratingZip] = useState(false);
 
   useEffect(() => {
     const unsubscribe = subscribeAppConfig((newCfg) => {
@@ -18,6 +20,21 @@ export const DownloadsScreen: React.FC = () => {
 
   // Dynamic download items populated exclusively from backend/owner configuration
   const downloads: DownloadItem[] = [
+    {
+      id: 'dsc-android-source-zip',
+      title: 'DSCWeb Android Studio Project Source (.zip)',
+      category: 'Android',
+      version: 'v1.0.0 (Source Archive)',
+      size: '2.4 MB',
+      date: '2026-09-11',
+      downloadUrl: 'source-zip',
+      changelog: [
+        'Complete native Kotlin and Jetpack Compose Android Studio project',
+        'Pre-configured Gradle 8.7 & AGP 8.8 buildable setup',
+        'Hardware Keystore encryption token store + Retrofit 2 client',
+        'Ready to extract and build via ./gradlew assembleDebug',
+      ],
+    },
     {
       id: 'dsc-android-client',
       title: 'DSCWeb Android Native Client',
@@ -78,7 +95,28 @@ export const DownloadsScreen: React.FC = () => {
 
   const filtered = activeCategory === 'All' ? downloads : downloads.filter((d) => d.category === activeCategory);
 
-  const handleDownload = (item: DownloadItem) => {
+  const handleDownload = async (item: DownloadItem) => {
+    if (item.downloadUrl === 'source-zip') {
+      try {
+        setIsGeneratingZip(true);
+        const zipBlob = await createAndroidProjectZip();
+        const url = URL.createObjectURL(zipBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'DSCWeb-Android-Studio-Project.zip';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('Failed to generate project ZIP:', err);
+        setNotice('Failed to generate Android project archive.');
+      } finally {
+        setIsGeneratingZip(false);
+      }
+      return;
+    }
+
     if (!item.downloadUrl || item.downloadUrl.trim() === '') {
       setNotice(`Download for "${item.title}" is currently unavailable. No link has been configured by the owner.`);
       setTimeout(() => setNotice(null), 4000);
@@ -146,9 +184,15 @@ export const DownloadsScreen: React.FC = () => {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2.5">
                     <div className="w-10 h-10 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
-                      {item.category === 'Android' && <Smartphone className="w-5 h-5" />}
-                      {item.category === 'Panel' && <FileCode className="w-5 h-5" />}
-                      {item.category === 'Tools' && <Terminal className="w-5 h-5" />}
+                      {item.downloadUrl === 'source-zip' ? (
+                        <Archive className="w-5 h-5" />
+                      ) : (
+                        <>
+                          {item.category === 'Android' && <Smartphone className="w-5 h-5" />}
+                          {item.category === 'Panel' && <FileCode className="w-5 h-5" />}
+                          {item.category === 'Tools' && <Terminal className="w-5 h-5" />}
+                        </>
+                      )}
                     </div>
                     <div>
                       <h3 className="text-xs font-bold text-white">{item.title}</h3>
@@ -199,10 +243,19 @@ export const DownloadsScreen: React.FC = () => {
                   {isAvailable ? (
                     <button
                       onClick={() => handleDownload(item)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all shadow-sm shadow-cyan-500/20"
+                      disabled={item.downloadUrl === 'source-zip' && isGeneratingZip}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 transition-all shadow-sm shadow-cyan-500/20 disabled:opacity-50"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Download Package</span>
+                      {item.downloadUrl === 'source-zip' ? (
+                        isGeneratingZip ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {item.downloadUrl === 'source-zip'
+                          ? (isGeneratingZip ? 'Generating ZIP...' : 'Download Project (.zip)')
+                          : 'Download Package'}
+                      </span>
                     </button>
                   ) : (
                     <button
