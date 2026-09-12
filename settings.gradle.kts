@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DSCWebAndroid"
+rootProject.name = "DSC"
 include(":app")
